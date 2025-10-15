@@ -309,6 +309,103 @@ async def main():
             print_test("Sound Playback (sound 3)", False)
             test_results["failed"] += 1
 
+        # ===== TEST 13: Light Intensity =====
+        print_header("Test 13: Light Intensity Sensor")
+        lux = await client.read_light_intensity()
+
+        if lux is not None:
+            print_test("Light Intensity", True, f"{lux} lux")
+            test_results["passed"] += 1
+        else:
+            print_test("Light Intensity", False, "Could not read light intensity")
+            test_results["failed"] += 1
+
+        # ===== TEST 14: Quaternion =====
+        print_header("Test 14: Quaternion Orientation")
+        quat = await client.read_quaternion()
+
+        if quat is not None:
+            w, x, y, z = quat
+            print_test("Quaternion", True, f"w={w:.3f}, x={x:.3f}, y={y:.3f}, z={z:.3f}")
+            test_results["passed"] += 1
+        else:
+            print_test("Quaternion", False, "Could not read quaternion")
+            test_results["failed"] += 1
+
+        # ===== TEST 15: Euler Angles =====
+        print_header("Test 15: Euler Angles")
+        angles = await client.read_euler_angles()
+
+        if angles is not None:
+            roll, pitch, yaw = angles
+            print_test("Euler Angles", True, f"Roll={roll:.1f}°, Pitch={pitch:.1f}°, Yaw={yaw:.1f}°")
+            test_results["passed"] += 1
+        else:
+            print_test("Euler Angles", False, "Could not read Euler angles")
+            test_results["failed"] += 1
+
+        # ===== TEST 16: Compass Heading =====
+        print_header("Test 16: Compass Heading")
+        heading = await client.read_heading()
+
+        if heading is not None:
+            print_test("Heading", True, f"{heading:.1f}°")
+            test_results["passed"] += 1
+        else:
+            print_test("Heading", False, "Could not read heading")
+            test_results["failed"] += 1
+
+        # ===== TEST 17: Orientation =====
+        print_header("Test 17: Device Orientation")
+        orientation = await client.read_orientation()
+
+        if orientation is not None:
+            orientation_map = {
+                0: "portrait",
+                1: "landscape",
+                2: "reverse_portrait",
+                3: "reverse_landscape",
+            }
+            orient_name = orientation_map.get(orientation, "unknown")
+            print_test("Orientation", True, orient_name)
+            test_results["passed"] += 1
+        else:
+            print_test("Orientation", False, "Could not read orientation")
+            test_results["failed"] += 1
+
+        # ===== TEST 18: Raw Motion Data =====
+        print_header("Test 18: Raw Motion Data (9-axis IMU)")
+        motion = await client.read_raw_motion()
+
+        if motion is not None:
+            print_test("Raw Motion", True)
+            print(f"  Accelerometer: X={motion['accelerometer']['x']}, Y={motion['accelerometer']['y']}, Z={motion['accelerometer']['z']}")
+            print(f"  Gyroscope: X={motion['gyroscope']['x']}, Y={motion['gyroscope']['y']}, Z={motion['gyroscope']['z']}")
+            print(f"  Magnetometer: X={motion['magnetometer']['x']}, Y={motion['magnetometer']['y']}, Z={motion['magnetometer']['z']}")
+            test_results["passed"] += 1
+        else:
+            print_test("Raw Motion", False, "Could not read raw motion data")
+            test_results["failed"] += 1
+
+        # ===== TEST 19: Tap Detection (Optional) =====
+        print_header("Test 19: Tap Detection (Optional)")
+        print("⚠️  Tap the device now (waiting 5 seconds)...")
+        print("   This test is optional and may timeout if not tapped.")
+
+        # Store old timeout
+        old_notification_event = client._notification_event
+        client._notification_event = asyncio.Event()
+
+        tap = await client.read_tap_event()
+
+        if tap is not None:
+            print_test("Tap Detection", True, f"{tap['type']} tap on {tap['direction']}")
+            test_results["passed"] += 1
+        else:
+            print_test("Tap Detection", False, "No tap detected (optional test)")
+            # Don't count this as a failure - it's event-based
+            print("   Note: This is normal if device was not tapped")
+
     except KeyboardInterrupt:
         print("\n\n⚠️  Test interrupted by user")
     except Exception as e:
@@ -353,7 +450,8 @@ if __name__ == "__main__":
     print("  - Make sure your Thingy:52 is powered on")
     print("  - Close the Nordic Thingy app if it's running")
     print("  - Keep the Thingy within 10 meters")
-    print("  - The test will take about 30-60 seconds")
+    print("  - Testing all 23 MCP tools (19 tests)")
+    print("  - This will take about 60-90 seconds")
     
     if len(sys.argv) > 1:
         print(f"\nUsing MAC address: {sys.argv[1]}")
