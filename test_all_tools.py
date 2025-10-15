@@ -25,9 +25,12 @@ from src.bluetooth_client import ThingyBLEClient
 from src.constants import LED_COLORS
 
 def is_valid_mac(mac):
-    """Validate MAC address format."""
+    """Validate MAC address format (supports both MAC and macOS UUID format)."""
+    # Standard MAC format: XX:XX:XX:XX:XX:XX
     mac_pattern = re.compile(r'^([0-9A-F]{2}:){5}[0-9A-F]{2}$')
-    return bool(mac_pattern.match(mac))
+    # macOS UUID format: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+    uuid_pattern = re.compile(r'^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$')
+    return bool(mac_pattern.match(mac) or uuid_pattern.match(mac))
 
 
 def print_header(title):
@@ -359,11 +362,16 @@ if __name__ == "__main__":
     
     print("\nPress Enter to start testing, or Ctrl+C to cancel...")
 
-    try:
-        input()
-    except KeyboardInterrupt:
-        print("\n\nTest cancelled.")
-        sys.exit(0)
+    # Check if running in interactive mode
+    import os
+    if os.isatty(sys.stdin.fileno()):
+        try:
+            input()
+        except KeyboardInterrupt:
+            print("\n\nTest cancelled.")
+            sys.exit(0)
+    else:
+        print("Running in non-interactive mode, starting tests automatically...")
 
     # Run the async main function
     results = asyncio.run(main())

@@ -33,6 +33,8 @@ class ThingyBLEClient:
         self.client: Optional[BleakClient] = None
         self.device: Optional[BLEDevice] = None
         self._connected = False
+        self._notification_data: Optional[bytes] = None
+        self._notification_event: Optional[asyncio.Event] = None
 
     @property
     def is_connected(self) -> bool:
@@ -119,13 +121,61 @@ class ThingyBLEClient:
                 return True
         return False
 
+    async def _read_via_notification(self, char_uuid: str, timeout: float = 5.0) -> Optional[bytes]:
+        """
+        Read a characteristic via notification (Thingy sensors use notifications, not direct reads).
+
+        Args:
+            char_uuid: Characteristic UUID to read
+            timeout: Timeout in seconds
+
+        Returns:
+            Received data or None on timeout
+        """
+        if not self.is_connected or self.client is None:
+            raise ConnectionError("Not connected to a device")
+
+        self._notification_data = None
+        self._notification_event = asyncio.Event()
+
+        def notification_handler(sender, data):
+            """Handle incoming notification."""
+            self._notification_data = data
+            if self._notification_event:
+                self._notification_event.set()
+
+        try:
+            # Subscribe to notifications
+            await self.client.start_notify(char_uuid, notification_handler)
+
+            # Wait for notification with timeout
+            try:
+                await asyncio.wait_for(self._notification_event.wait(), timeout=timeout)
+                data = self._notification_data
+            except asyncio.TimeoutError:
+                logger.warning(f"Timeout waiting for notification from {char_uuid}")
+                data = None
+            finally:
+                # Stop notifications
+                await self.client.stop_notify(char_uuid)
+
+            return data
+        except Exception as e:
+            logger.error(f"Failed to read via notification from {char_uuid}: {e}")
+            return None
+
     async def read_temperature(self) -> Optional[float]:
-        """Read temperature sensor."""
+        """Read temperature sensor via notification."""
         if not self.is_connected or self.client is None:
             raise ConnectionError("Not connected to a device")
 
         try:
-            data = await self.client.read_gatt_char(TEMPERATURE_UUID)
+            data = await self._read_via_notification(TEMPERATURE_UUID, timeout=5.0)
+
+            if data is None:
+                logger.error("No temperature data received")
+                return None
+
             logger.debug(f"Raw temperature data: {data.hex()} (length: {len(data)})")
 
             if len(data) < 2:
@@ -143,12 +193,17 @@ class ThingyBLEClient:
             return None
 
     async def read_humidity(self) -> Optional[float]:
-        """Read humidity sensor."""
+        """Read humidity sensor via notification."""
         if not self.is_connected or self.client is None:
             raise ConnectionError("Not connected to a device")
 
         try:
-            data = await self.client.read_gatt_char(HUMIDITY_UUID)
+            data = await self._read_via_notification(HUMIDITY_UUID, timeout=5.0)
+
+            if data is None:
+                logger.error("No humidity data received")
+                return None
+
             logger.debug(f"Raw humidity data: {data.hex()} (length: {len(data)})")
 
             if len(data) < 1:
@@ -164,12 +219,17 @@ class ThingyBLEClient:
             return None
 
     async def read_pressure(self) -> Optional[float]:
-        """Read pressure sensor."""
+        """Read pressure sensor via notification."""
         if not self.is_connected or self.client is None:
             raise ConnectionError("Not connected to a device")
 
         try:
-            data = await self.client.read_gatt_char(PRESSURE_UUID)
+            data = await self._read_via_notification(PRESSURE_UUID, timeout=5.0)
+
+            if data is None:
+                logger.error("No pressure data received")
+                return None
+
             logger.debug(f"Raw pressure data: {data.hex()} (length: {len(data)})")
 
             if len(data) < 5:
@@ -189,12 +249,17 @@ class ThingyBLEClient:
             return None
 
     async def read_air_quality(self) -> tuple[Optional[int], Optional[int]]:
-        """Read air quality sensor (CO2 and TVOC)."""
+        """Read air quality sensor (CO2 and TVOC) via notification."""
         if not self.is_connected or self.client is None:
             raise ConnectionError("Not connected to a device")
 
         try:
-            data = await self.client.read_gatt_char(AIR_QUALITY_UUID)
+            data = await self._read_via_notification(AIR_QUALITY_UUID, timeout=5.0)
+
+            if data is None:
+                logger.error("No air quality data received")
+                return (None, None)
+
             # CO2 (eCO2): 2 bytes, TVOC: 2 bytes
             co2 = int.from_bytes(data[0:2], "little", signed=False)
             tvoc = int.from_bytes(data[2:4], "little", signed=False)
@@ -205,12 +270,17 @@ class ThingyBLEClient:
             return (None, None)
 
     async def read_color(self) -> Optional[ColorData]:
-        """Read color sensor."""
+        """Read color sensor via notification."""
         if not self.is_connected or self.client is None:
             raise ConnectionError("Not connected to a device")
 
         try:
-            data = await self.client.read_gatt_char(COLOR_UUID)
+            data = await self._read_via_notification(COLOR_UUID, timeout=5.0)
+
+            if data is None:
+                logger.error("No color sensor data received")
+                return None
+
             # RGBC: 2 bytes each
             red = int.from_bytes(data[0:2], "little", signed=False)
             green = int.from_bytes(data[2:4], "little", signed=False)
@@ -236,12 +306,17 @@ class ThingyBLEClient:
             return None
 
     async def read_step_count(self) -> Optional[int]:
-        """Read step counter."""
+        """Read step counter via notification."""
         if not self.is_connected or self.client is None:
             raise ConnectionError("Not connected to a device")
 
         try:
-            data = await self.client.read_gatt_char(STEP_COUNTER_UUID)
+            data = await self._read_via_notification(STEP_COUNTER_UUID, timeout=5.0)
+
+            if data is None:
+                logger.error("No step count data received")
+                return None
+
             steps = int.from_bytes(data[0:4], "little", signed=False)
             logger.debug(f"Steps: {steps}")
             return steps
@@ -289,8 +364,10 @@ class ThingyBLEClient:
             g = int(green * intensity / 100)
             b = int(blue * intensity / 100)
 
-            # LED data format: mode (1 byte) + R (1) + G (1) + B (1) + delay (2 bytes LE)
-            data = bytes([mode, r, g, b]) + delay.to_bytes(2, "little")
+            # LED data format: mode (1 byte) + R (1) + G (1) + B (1) + delay (1 byte)
+            # Note: delay is in units of 50ms, so delay=20 = 1 second
+            delay_byte = min(255, delay // 50) if delay > 0 else 0
+            data = bytes([mode, r, g, b, delay_byte])
             await self.client.write_gatt_char(LED_UUID, data)
             logger.info(f"LED set to RGB({r},{g},{b}) mode={mode}")
             return True
@@ -317,7 +394,8 @@ class ThingyBLEClient:
         try:
             # Speaker data format: sound_id (1 byte)
             data = bytes([sound_id])
-            await self.client.write_gatt_char(SPEAKER_DATA_UUID, data)
+            # Speaker characteristic requires write-without-response
+            await self.client.write_gatt_char(SPEAKER_DATA_UUID, data, response=False)
             logger.info(f"Playing sound {sound_id}")
             return True
         except Exception as e:
