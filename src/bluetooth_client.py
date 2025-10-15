@@ -373,7 +373,7 @@ class ThingyBLEClient:
             green: Green value (0-255)
             blue: Blue value (0-255)
             intensity: Brightness (0-100)
-            delay: Delay in ms for breathe/one-shot modes
+            delay: Delay in ms for breathe/one-shot modes (ignored - not supported by Thingy LED characteristic)
 
         Returns:
             True if successful
@@ -387,10 +387,9 @@ class ThingyBLEClient:
             g = int(green * intensity / 100)
             b = int(blue * intensity / 100)
 
-            # LED data format: mode (1 byte) + R (1) + G (1) + B (1) + delay (1 byte)
-            # Note: delay is in units of 50ms, so delay=20 = 1 second
-            delay_byte = min(255, delay // 50) if delay > 0 else 0
-            data = bytes([mode, r, g, b, delay_byte])
+            # LED data format: mode (1 byte) + R (1) + G (1) + B (1) = 4 bytes total
+            # Note: Thingy:52 LED characteristic expects exactly 4 bytes
+            data = bytes([mode, r, g, b])
             await self.client.write_gatt_char(LED_UUID, data)
             logger.info(f"LED set to RGB({r},{g},{b}) mode={mode}")
             return True
