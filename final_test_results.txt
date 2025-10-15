@@ -1,0 +1,172 @@
+Timeout waiting for notification from EF680405-9B35-4933-9B10-52FFA9740042
+No step count data received
+Failed to set LED: Failed to write characteristic 83: Error Domain=CBATTErrorDomain Code=3 "Writing is not permitted." UserInfo={NSLocalizedDescription=Writing is not permitted.}
+Timeout waiting for notification from EF680407-9B35-4933-9B10-52FFA9740042
+No Euler angle data received
+Timeout waiting for notification from EF680409-9B35-4933-9B10-52FFA9740042
+No heading data received
+Timeout waiting for notification from EF680403-9B35-4933-9B10-52FFA9740042
+No orientation data received
+Timeout waiting for notification from EF680406-9B35-4933-9B10-52FFA9740042
+No raw motion data received
+Timeout waiting for notification from EF680402-9B35-4933-9B10-52FFA9740042
+No tap event within timeout
+
+⚠️  Important Notes:
+  - Make sure your Thingy:52 is powered on
+  - Close the Nordic Thingy app if it's running
+  - Keep the Thingy within 10 meters
+  - Testing all 23 MCP tools (19 tests)
+  - This will take about 60-90 seconds
+
+No MAC address provided - will scan for nearby devices
+
+Press Enter to start testing, or Ctrl+C to cancel...
+Running in non-interactive mode, starting tests automatically...
+
+======================================================================
+  Nordic Thingy:52 MCP Server - Tool Test Suite
+======================================================================
+Started at: 2025-10-15 15:20:10
+
+
+======================================================================
+  Test 1: Device Discovery
+======================================================================
+Scanning for Thingy devices (10 seconds)...
+✓ Device Discovery: PASS - Found 1 device(s)
+  [1] Thingy
+      Address: 6F7B7547-571E-9B48-5370-256B16ACFE2F
+      RSSI: -55 dBm
+
+======================================================================
+  Test 2: Device Connection
+======================================================================
+Connecting to 6F7B7547-571E-9B48-5370-256B16ACFE2F...
+✓ Connection: PASS - Successfully connected
+Waiting 2 seconds for device to stabilize...
+
+======================================================================
+  Test 3: Battery Status
+======================================================================
+✓ Battery Reading: PASS - 69%
+
+======================================================================
+  Test 4: Temperature Sensor
+======================================================================
+✓ Temperature: PASS - 29.91°C
+
+======================================================================
+  Test 5: Humidity Sensor
+======================================================================
+✓ Humidity: PASS - 75.0%
+
+======================================================================
+  Test 6: Pressure Sensor
+======================================================================
+✓ Pressure: PASS - 9.411200000000001 hPa
+
+======================================================================
+  Test 7: Air Quality Sensor
+======================================================================
+✓ Air Quality: PASS - CO2: 0 ppm, TVOC: 0 ppb
+
+======================================================================
+  Test 8: Color Sensor
+======================================================================
+✓ Color Sensor: PASS - R:1490 G:1344 B:1433 C:262
+
+======================================================================
+  Test 9: Step Counter
+======================================================================
+✗ Step Counter: FAIL - Could not read step counter
+
+======================================================================
+  Test 10: All Environmental Sensors
+======================================================================
+Reading all environmental sensors at once...
+✓ All Sensors: PASS
+  Temperature: 30.08°C
+  Humidity: 74.0%
+  Pressure: 9.4109 hPa
+  CO2: 0 ppm
+  TVOC: 0 ppb
+
+======================================================================
+  Test 11: LED Control
+======================================================================
+Testing LED colors (watch your Thingy)...
+✓ LED Red: PASS
+✓ LED Green: PASS
+✓ LED Blue: PASS
+Testing breathing effect (purple)...
+✗ LED Breathing: FAIL
+LED turned off
+
+======================================================================
+  Test 12: Sound Control
+======================================================================
+Testing sound playback...
+✓ Sound Playback (beep): PASS
+Playing sound 3...
+✓ Sound Playback (sound 3): PASS
+
+======================================================================
+  Test 13: Light Intensity Sensor
+======================================================================
+✓ Light Intensity: PASS - 267 lux
+
+======================================================================
+  Test 14: Quaternion Orientation
+======================================================================
+✓ Quaternion: PASS - w=1.000, x=0.010, y=0.003, z=-0.000
+
+======================================================================
+  Test 15: Euler Angles
+======================================================================
+✗ Euler Angles: FAIL - Could not read Euler angles
+
+======================================================================
+  Test 16: Compass Heading
+======================================================================
+✗ Heading: FAIL - Could not read heading
+
+======================================================================
+  Test 17: Device Orientation
+======================================================================
+✗ Orientation: FAIL - Could not read orientation
+
+======================================================================
+  Test 18: Raw Motion Data (9-axis IMU)
+======================================================================
+✗ Raw Motion: FAIL - Could not read raw motion data
+
+======================================================================
+  Test 19: Tap Detection (Optional)
+======================================================================
+⚠️  Tap the device now (waiting 5 seconds)...
+   This test is optional and may timeout if not tapped.
+✗ Tap Detection: FAIL - No tap detected (optional test)
+   Note: This is normal if device was not tapped
+
+======================================================================
+  Cleanup
+======================================================================
+Disconnecting from device...
+✓ Disconnect: PASS
+
+======================================================================
+  Test Summary
+======================================================================
+Total Tests: 22
+✓ Passed: 16
+✗ Failed: 6
+
+⚠️  Some tests failed. 16/22 tests passed.
+Check the output above for details on what failed.
+Success Rate: 72.7%
+
+======================================================================
+Completed at: 2025-10-15 15:21:21
+======================================================================
+
