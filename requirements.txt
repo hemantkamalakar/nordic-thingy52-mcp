@@ -1,0 +1,18 @@
+# MCP SDK with CLI support
+mcp[cli]>=1.0.0
+
+# Bluetooth LE
+bleak>=0.21.0
+
+# Data validation and settings
+pydantic>=2.0.0
+pydantic-settings>=2.0.0
+
+# Async utilities
+aiofiles>=23.0.0
+
+# Date/time utilities
+python-dateutil>=2.8.0
+
+# Console output (cross-platform)
+colorama>=0.4.6
