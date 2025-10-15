@@ -6,8 +6,8 @@ Production-ready MCP (Model Context Protocol) server for controlling Nordic Thin
 
 - 🔍 **Device Discovery**: Automatically find nearby Thingy:52 devices
 - 🔌 **Connection Management**: Reliable Bluetooth LE connectivity with auto-reconnect
-- 🌡️ **Environmental Monitoring**: Temperature, humidity, pressure, CO2, TVOC sensors
-- 🎯 **Motion Sensing**: Step counting, tap detection, and 9-axis motion data
+- 🌡️ **Environmental Monitoring**: Temperature, humidity, pressure, CO2, TVOC, color, light intensity
+- 🎯 **Motion Sensing**: Step counting, tap detection, quaternions, Euler angles, compass heading, orientation, 9-axis IMU
 - 💡 **LED Control**: Full RGB control with breathing effects
 - 🔊 **Sound Playback**: 8 preset sounds through built-in speaker
 - 🤖 **Natural Language**: Control everything through conversation with Claude
@@ -181,16 +181,25 @@ The server exposes these tools to Claude:
 - `disconnect_device()` - Disconnect from current device
 - `get_device_status()` - Check connection and battery status
 
-### Sensors
+### Environmental Sensors (8 tools)
 - `read_temperature()` - Temperature in Celsius
 - `read_humidity()` - Relative humidity percentage
 - `read_pressure()` - Atmospheric pressure in hPa
 - `read_air_quality()` - CO2 (ppm) and TVOC (ppb)
 - `read_all_sensors()` - All environmental sensors at once
 - `read_color_sensor()` - RGBC values
+- `read_light_intensity()` - Light intensity in lux
 - `read_step_count()` - Step counter
 
-### LED Control
+### Advanced Motion (6 tools)
+- `read_quaternion()` - Quaternion orientation (w, x, y, z)
+- `read_euler_angles()` - Roll, pitch, yaw in degrees
+- `read_heading()` - Compass heading (0-360 degrees)
+- `read_orientation()` - Device orientation (portrait/landscape)
+- `read_tap_event()` - Tap detection (single/double, direction)
+- `read_raw_motion()` - Raw accelerometer, gyroscope, magnetometer
+
+### LED Control (3 tools)
 - `set_led_color(color, red, green, blue, intensity)` - Set LED color
 - `set_led_breathe(color, intensity, delay)` - Breathing effect
 - `turn_off_led()` - Turn off LED

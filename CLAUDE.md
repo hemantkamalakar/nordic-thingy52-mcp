@@ -147,14 +147,23 @@ One ThingyBLEClient instance shared across all tools, maintaining connection sta
 - `disconnect_device()` - Disconnect current device
 - `get_device_status()` - Connection and battery status
 
-### Sensors (7 tools)
+### Environmental Sensors (8 tools)
 - `read_temperature()` - Temperature in Celsius
 - `read_humidity()` - Relative humidity %
 - `read_pressure()` - Atmospheric pressure hPa
 - `read_air_quality()` - CO2 ppm and TVOC ppb with quality assessment
 - `read_all_sensors()` - All environmental sensors at once
 - `read_color_sensor()` - RGBC values
+- `read_light_intensity()` - Light intensity in lux
 - `read_step_count()` - Step counter
+
+### Advanced Motion (6 tools)
+- `read_quaternion()` - Quaternion orientation (w, x, y, z)
+- `read_euler_angles()` - Roll, pitch, yaw in degrees
+- `read_heading()` - Compass heading (0-360 degrees)
+- `read_orientation()` - Device orientation (portrait/landscape)
+- `read_tap_event()` - Tap detection (single/double, direction)
+- `read_raw_motion()` - Raw accelerometer, gyroscope, magnetometer
 
 ### LED Control (3 tools)
 - `set_led_color(color, red, green, blue, intensity)` - Set LED with named color or RGB
@@ -165,7 +174,7 @@ One ThingyBLEClient instance shared across all tools, maintaining connection sta
 - `play_sound(sound_id)` - Play preset sound 1-8
 - `beep()` - Quick beep sound
 
-**Total: 16 tools implemented**
+**Total: 23 tools implemented**
 
 ## Testing Requirements
 
