@@ -220,6 +220,141 @@ async def read_step_count() -> dict[str, Optional[int]]:
     return {"steps": steps}
 
 
+@mcp.tool()
+async def read_light_intensity() -> dict[str, Optional[int]]:
+    """
+    Read light intensity (lux) from the ambient light sensor.
+
+    Returns:
+        Light intensity in lux
+    """
+    lux = await ble_client.read_light_intensity()
+    return {"light_intensity_lux": lux, "unit": "lux"}
+
+
+# === Advanced Motion Sensor Tools ===
+
+logger.info("Registering advanced motion sensor tools...")
+
+
+@mcp.tool()
+async def read_quaternion() -> dict:
+    """
+    Read quaternion orientation data (w, x, y, z).
+
+    Quaternions provide rotation information without gimbal lock issues.
+
+    Returns:
+        Quaternion components (w, x, y, z)
+    """
+    quat = await ble_client.read_quaternion()
+    if quat:
+        w, x, y, z = quat
+        return {
+            "w": w,
+            "x": x,
+            "y": y,
+            "z": z,
+            "format": "quaternion"
+        }
+    return {"error": "Failed to read quaternion"}
+
+
+@mcp.tool()
+async def read_euler_angles() -> dict:
+    """
+    Read Euler angles (roll, pitch, yaw) in degrees.
+
+    Returns:
+        Roll, pitch, and yaw angles in degrees
+    """
+    angles = await ble_client.read_euler_angles()
+    if angles:
+        roll, pitch, yaw = angles
+        return {
+            "roll_degrees": roll,
+            "pitch_degrees": pitch,
+            "yaw_degrees": yaw,
+            "unit": "degrees"
+        }
+    return {"error": "Failed to read Euler angles"}
+
+
+@mcp.tool()
+async def read_heading() -> dict[str, Optional[float]]:
+    """
+    Read compass heading in degrees (0-360).
+
+    Returns:
+        Compass heading in degrees
+    """
+    heading = await ble_client.read_heading()
+    return {"heading_degrees": heading, "unit": "degrees", "range": "0-360"}
+
+
+@mcp.tool()
+async def read_orientation() -> dict:
+    """
+    Read device orientation (portrait, landscape, etc.).
+
+    Returns:
+        Current device orientation
+    """
+    orientation = await ble_client.read_orientation()
+
+    orientation_map = {
+        0: "portrait",
+        1: "landscape",
+        2: "reverse_portrait",
+        3: "reverse_landscape",
+    }
+
+    return {
+        "orientation": orientation_map.get(orientation, "unknown"),
+        "orientation_code": orientation
+    }
+
+
+@mcp.tool()
+async def read_tap_event(timeout: int = 10) -> dict:
+    """
+    Wait for and detect tap events on the device.
+
+    This is an event-based sensor - it will wait up to timeout seconds for a tap.
+
+    Args:
+        timeout: Maximum seconds to wait for a tap event (default: 10)
+
+    Returns:
+        Tap event details including type (single/double) and direction
+    """
+    tap = await ble_client.read_tap_event()
+    if tap:
+        return {
+            "tap_detected": True,
+            "type": tap["type"],
+            "direction": tap["direction"],
+            "count": tap["count"]
+        }
+    return {"tap_detected": False, "message": "No tap detected within timeout"}
+
+
+@mcp.tool()
+async def read_raw_motion() -> dict:
+    """
+    Read raw accelerometer, gyroscope, and magnetometer data.
+
+    Provides low-level motion sensor data for custom processing.
+
+    Returns:
+        Raw 3-axis data for accelerometer, gyroscope, and magnetometer
+    """
+    motion = await ble_client.read_raw_motion()
+    if motion:
+        return motion
+    return {"error": "Failed to read raw motion data"}
+
+
 # === LED Control Tools ===
 
 logger.info("Registering LED control tools...")
@@ -390,11 +525,14 @@ if __name__ == "__main__":
     logger.info("=" * 70)
     logger.info("Tool registration complete!")
     logger.info("Available tools:")
-    logger.info("  Device Management: scan_devices, connect_device, disconnect_device, get_device_status")
-    logger.info("  Sensors: read_temperature, read_humidity, read_pressure, read_air_quality,")
-    logger.info("           read_all_sensors, read_color_sensor, read_step_count")
-    logger.info("  LED Control: set_led_color, set_led_breathe, turn_off_led")
-    logger.info("  Sound: play_sound, beep")
+    logger.info("  Device Management (4): scan_devices, connect_device, disconnect_device, get_device_status")
+    logger.info("  Environmental Sensors (8): read_temperature, read_humidity, read_pressure, read_air_quality,")
+    logger.info("                              read_all_sensors, read_color_sensor, read_light_intensity, read_step_count")
+    logger.info("  Advanced Motion (6): read_quaternion, read_euler_angles, read_heading,")
+    logger.info("                       read_orientation, read_tap_event, read_raw_motion")
+    logger.info("  LED Control (3): set_led_color, set_led_breathe, turn_off_led")
+    logger.info("  Sound (2): play_sound, beep")
+    logger.info("Total: 23 MCP tools")
     logger.info("=" * 70)
     logger.info("Starting FastMCP server...")
     logger.info("Listening for MCP requests from Claude Desktop...")

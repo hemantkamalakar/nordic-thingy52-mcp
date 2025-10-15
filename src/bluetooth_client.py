@@ -11,12 +11,19 @@ from bleak.backends.device import BLEDevice
 from .constants import (
     AIR_QUALITY_UUID,
     BATTERY_LEVEL_UUID,
+    BUTTON_UUID,
     COLOR_UUID,
+    EULER_UUID,
+    HEADING_UUID,
     HUMIDITY_UUID,
     LED_UUID,
+    ORIENTATION_UUID,
     PRESSURE_UUID,
+    QUATERNION_UUID,
+    RAW_DATA_UUID,
     SPEAKER_DATA_UUID,
     STEP_COUNTER_UUID,
+    TAP_UUID,
     TEMPERATURE_UUID,
     THINGY_NAME_PATTERNS,
 )
@@ -270,7 +277,7 @@ class ThingyBLEClient:
             return (None, None)
 
     async def read_color(self) -> Optional[ColorData]:
-        """Read color sensor via notification."""
+        """Read color sensor via notification (includes light intensity in clear channel)."""
         if not self.is_connected or self.client is None:
             raise ConnectionError("Not connected to a device")
 
@@ -286,10 +293,26 @@ class ThingyBLEClient:
             green = int.from_bytes(data[2:4], "little", signed=False)
             blue = int.from_bytes(data[4:6], "little", signed=False)
             clear = int.from_bytes(data[6:8], "little", signed=False)
+
+            # Clear channel represents light intensity (approximation of lux)
+            # Nordic Thingy uses clear channel as ambient light sensor
+            logger.debug(f"Color: R={red}, G={green}, B={blue}, Light={clear} lux")
+
             return ColorData(red=red, green=green, blue=blue, clear=clear)
         except Exception as e:
             logger.error(f"Failed to read color sensor: {e}")
             return None
+
+    async def read_light_intensity(self) -> Optional[int]:
+        """
+        Read light intensity (lux) from color sensor.
+
+        Note: This uses the clear channel of the color sensor.
+        """
+        color_data = await self.read_color()
+        if color_data:
+            return color_data.clear
+        return None
 
     async def read_battery(self) -> Optional[int]:
         """Read battery level."""
@@ -401,3 +424,179 @@ class ThingyBLEClient:
         except Exception as e:
             logger.error(f"Failed to play sound: {e}")
             return False
+
+    # === Advanced Sensor Methods ===
+
+    async def read_quaternion(self) -> Optional[tuple[float, float, float, float]]:
+        """Read quaternion orientation data via notification."""
+        if not self.is_connected or self.client is None:
+            raise ConnectionError("Not connected to a device")
+
+        try:
+            data = await self._read_via_notification(QUATERNION_UUID, timeout=5.0)
+
+            if data is None:
+                logger.error("No quaternion data received")
+                return None
+
+            # Quaternion: 4 floats (w, x, y, z), 4 bytes each = 16 bytes total
+            # Format: signed 32-bit fixed point with 30 fractional bits
+            w = int.from_bytes(data[0:4], "little", signed=True) / (1 << 30)
+            x = int.from_bytes(data[4:8], "little", signed=True) / (1 << 30)
+            y = int.from_bytes(data[8:12], "little", signed=True) / (1 << 30)
+            z = int.from_bytes(data[12:16], "little", signed=True) / (1 << 30)
+
+            logger.debug(f"Quaternion: w={w}, x={x}, y={y}, z={z}")
+            return (w, x, y, z)
+        except Exception as e:
+            logger.error(f"Failed to read quaternion: {e}")
+            return None
+
+    async def read_euler_angles(self) -> Optional[tuple[float, float, float]]:
+        """Read Euler angles (roll, pitch, yaw) via notification."""
+        if not self.is_connected or self.client is None:
+            raise ConnectionError("Not connected to a device")
+
+        try:
+            data = await self._read_via_notification(EULER_UUID, timeout=5.0)
+
+            if data is None:
+                logger.error("No Euler angle data received")
+                return None
+
+            # Euler angles: 3 signed 32-bit integers in degrees * 65536
+            roll = int.from_bytes(data[0:4], "little", signed=True) / 65536.0
+            pitch = int.from_bytes(data[4:8], "little", signed=True) / 65536.0
+            yaw = int.from_bytes(data[8:12], "little", signed=True) / 65536.0
+
+            logger.debug(f"Euler angles: roll={roll}°, pitch={pitch}°, yaw={yaw}°")
+            return (roll, pitch, yaw)
+        except Exception as e:
+            logger.error(f"Failed to read Euler angles: {e}")
+            return None
+
+    async def read_heading(self) -> Optional[float]:
+        """Read compass heading via notification."""
+        if not self.is_connected or self.client is None:
+            raise ConnectionError("Not connected to a device")
+
+        try:
+            data = await self._read_via_notification(HEADING_UUID, timeout=5.0)
+
+            if data is None:
+                logger.error("No heading data received")
+                return None
+
+            # Heading: signed 32-bit integer in degrees * 65536
+            heading = int.from_bytes(data[0:4], "little", signed=True) / 65536.0
+
+            # Normalize to 0-360
+            heading = heading % 360
+            if heading < 0:
+                heading += 360
+
+            logger.debug(f"Heading: {heading}°")
+            return heading
+        except Exception as e:
+            logger.error(f"Failed to read heading: {e}")
+            return None
+
+    async def read_tap_event(self) -> Optional[dict]:
+        """
+        Subscribe to tap detection events.
+
+        Note: This is an event-based sensor that requires continuous monitoring.
+        Use this for event-driven applications.
+        """
+        if not self.is_connected or self.client is None:
+            raise ConnectionError("Not connected to a device")
+
+        try:
+            data = await self._read_via_notification(TAP_UUID, timeout=10.0)
+
+            if data is None:
+                logger.warning("No tap event within timeout")
+                return None
+
+            # Tap data format: direction (1 byte) + count (1 byte)
+            direction = data[0]  # 1=X+, 2=X-, 3=Y+, 4=Y-, 5=Z+, 6=Z-
+            count = data[1]  # 1=single tap, 2=double tap
+
+            direction_map = {
+                1: "X+", 2: "X-", 3: "Y+", 4: "Y-", 5: "Z+", 6: "Z-"
+            }
+
+            tap_type = "double" if count == 2 else "single"
+
+            logger.info(f"Tap detected: {tap_type} tap on {direction_map.get(direction, 'unknown')}")
+            return {
+                "type": tap_type,
+                "direction": direction_map.get(direction, "unknown"),
+                "count": count,
+            }
+        except Exception as e:
+            logger.error(f"Failed to read tap event: {e}")
+            return None
+
+    async def read_orientation(self) -> Optional[int]:
+        """Read device orientation via notification."""
+        if not self.is_connected or self.client is None:
+            raise ConnectionError("Not connected to a device")
+
+        try:
+            data = await self._read_via_notification(ORIENTATION_UUID, timeout=5.0)
+
+            if data is None:
+                logger.error("No orientation data received")
+                return None
+
+            # Orientation: 1 byte (0=portrait, 1=landscape, 2=reverse portrait, 3=reverse landscape)
+            orientation = data[0]
+
+            orientation_map = {
+                0: "portrait",
+                1: "landscape",
+                2: "reverse_portrait",
+                3: "reverse_landscape",
+            }
+
+            logger.debug(f"Orientation: {orientation_map.get(orientation, 'unknown')}")
+            return orientation
+        except Exception as e:
+            logger.error(f"Failed to read orientation: {e}")
+            return None
+
+    async def read_raw_motion(self) -> Optional[dict]:
+        """Read raw accelerometer, gyroscope, and magnetometer data via notification."""
+        if not self.is_connected or self.client is None:
+            raise ConnectionError("Not connected to a device")
+
+        try:
+            data = await self._read_via_notification(RAW_DATA_UUID, timeout=5.0)
+
+            if data is None:
+                logger.error("No raw motion data received")
+                return None
+
+            # Raw data format: accel (3x2 bytes) + gyro (3x2 bytes) + compass (3x2 bytes)
+            # All values are signed 16-bit integers
+            accel_x = int.from_bytes(data[0:2], "little", signed=True)
+            accel_y = int.from_bytes(data[2:4], "little", signed=True)
+            accel_z = int.from_bytes(data[4:6], "little", signed=True)
+
+            gyro_x = int.from_bytes(data[6:8], "little", signed=True)
+            gyro_y = int.from_bytes(data[8:10], "little", signed=True)
+            gyro_z = int.from_bytes(data[10:12], "little", signed=True)
+
+            compass_x = int.from_bytes(data[12:14], "little", signed=True)
+            compass_y = int.from_bytes(data[14:16], "little", signed=True)
+            compass_z = int.from_bytes(data[16:18], "little", signed=True)
+
+            return {
+                "accelerometer": {"x": accel_x, "y": accel_y, "z": accel_z},
+                "gyroscope": {"x": gyro_x, "y": gyro_y, "z": gyro_z},
+                "magnetometer": {"x": compass_x, "y": compass_y, "z": compass_z},
+            }
+        except Exception as e:
+            logger.error(f"Failed to read raw motion data: {e}")
+            return None
