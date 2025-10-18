@@ -78,3 +78,12 @@ class ConnectionStatus(BaseModel):
     name: Optional[str] = None
     battery_level: Optional[int] = Field(None, ge=0, le=100, description="Battery percentage")
     rssi: Optional[int] = Field(None, description="Signal strength in dBm")
+
+
+class AutoReconnectConfig(BaseModel):
+    """Auto-reconnect configuration."""
+
+    enabled: bool = Field(True, description="Enable automatic reconnection")
+    max_attempts: int = Field(10, ge=0, description="Maximum reconnection attempts (0 = infinite)")
+    initial_delay: float = Field(1.0, gt=0, description="Initial delay between retries in seconds")
+    max_delay: float = Field(30.0, gt=0, description="Maximum delay between retries in seconds")

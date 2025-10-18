@@ -2,7 +2,6 @@
 
 import asyncio
 import logging
-import struct
 from typing import List, Optional
 
 from bleak import BleakClient, BleakScanner
@@ -11,7 +10,6 @@ from bleak.backends.device import BLEDevice
 from .constants import (
     AIR_QUALITY_UUID,
     BATTERY_LEVEL_UUID,
-    BUTTON_UUID,
     COLOR_UUID,
     EULER_UUID,
     HEADING_UUID,
@@ -22,6 +20,7 @@ from .constants import (
     QUATERNION_UUID,
     RAW_DATA_UUID,
     SPEAKER_DATA_UUID,
+    SPEAKER_STATUS_UUID,
     STEP_COUNTER_UUID,
     TAP_UUID,
     TEMPERATURE_UUID,
@@ -35,18 +34,153 @@ logger = logging.getLogger(__name__)
 class ThingyBLEClient:
     """Bluetooth LE client for Nordic Thingy:52 devices."""
 
-    def __init__(self) -> None:
-        """Initialize the BLE client."""
+    def __init__(
+        self,
+        auto_reconnect: bool = True,
+        max_reconnect_attempts: int = 10,
+        initial_retry_delay: float = 1.0,
+        max_retry_delay: float = 30.0,
+    ) -> None:
+        """
+        Initialize the BLE client.
+
+        Args:
+            auto_reconnect: Enable automatic reconnection on unexpected disconnects
+            max_reconnect_attempts: Maximum number of reconnection attempts (0 = infinite)
+            initial_retry_delay: Initial delay between retry attempts in seconds
+            max_retry_delay: Maximum delay between retry attempts in seconds
+        """
         self.client: Optional[BleakClient] = None
         self.device: Optional[BLEDevice] = None
         self._connected = False
         self._notification_data: Optional[bytes] = None
         self._notification_event: Optional[asyncio.Event] = None
 
+        # Auto-reconnect configuration
+        self.auto_reconnect = auto_reconnect
+        self.max_reconnect_attempts = max_reconnect_attempts
+        self.initial_retry_delay = initial_retry_delay
+        self.max_retry_delay = max_retry_delay
+
+        # Connection state tracking
+        self._last_address: Optional[str] = None
+        self._manual_disconnect = False
+        self._reconnecting = False
+        self._reconnect_task: Optional[asyncio.Task] = None
+        self._retry_count = 0
+
     @property
     def is_connected(self) -> bool:
         """Check if connected to a device."""
         return self._connected and self.client is not None and self.client.is_connected
+
+    @property
+    def is_reconnecting(self) -> bool:
+        """Check if currently attempting to reconnect."""
+        return self._reconnecting
+
+    @property
+    def connection_state(self) -> str:
+        """
+        Get the current connection state.
+
+        Returns:
+            One of: 'connected', 'disconnected', 'reconnecting', 'manual_disconnect'
+        """
+        if self.is_connected:
+            return "connected"
+        elif self._reconnecting:
+            return "reconnecting"
+        elif self._manual_disconnect:
+            return "manual_disconnect"
+        else:
+            return "disconnected"
+
+    def _on_disconnect(self, client: BleakClient) -> None:
+        """
+        Callback when device disconnects.
+
+        Args:
+            client: The BleakClient that disconnected
+        """
+        logger.warning(f"Device disconnected: {client.address}")
+        self._connected = False
+
+        # Only trigger auto-reconnect if it wasn't a manual disconnect
+        if not self._manual_disconnect and self.auto_reconnect and not self._reconnecting:
+            logger.info("Unexpected disconnect - starting auto-reconnect...")
+            # Schedule reconnection in the background
+            try:
+                loop = asyncio.get_event_loop()
+                self._reconnect_task = loop.create_task(self._auto_reconnect())
+            except RuntimeError:
+                logger.error("Cannot schedule reconnection: no event loop running")
+
+    async def _auto_reconnect(self) -> None:
+        """
+        Automatically attempt to reconnect with exponential backoff.
+        """
+        if not self._last_address:
+            logger.error("Cannot auto-reconnect: no previous address stored")
+            return
+
+        self._reconnecting = True
+        self._retry_count = 0
+        delay = self.initial_retry_delay
+
+        logger.info(
+            f"Starting auto-reconnect to {self._last_address} "
+            f"(max attempts: {'infinite' if self.max_reconnect_attempts == 0 else self.max_reconnect_attempts})"
+        )
+
+        while True:
+            # Check if we've exceeded max attempts
+            if self.max_reconnect_attempts > 0 and self._retry_count >= self.max_reconnect_attempts:
+                logger.error(
+                    f"Auto-reconnect failed after {self._retry_count} attempts. Giving up."
+                )
+                self._reconnecting = False
+                return
+
+            self._retry_count += 1
+            logger.info(
+                f"Reconnection attempt {self._retry_count}"
+                f"{f'/{self.max_reconnect_attempts}' if self.max_reconnect_attempts > 0 else ''} "
+                f"in {delay:.1f}s..."
+            )
+
+            # Wait before attempting reconnection
+            await asyncio.sleep(delay)
+
+            # Attempt to reconnect
+            try:
+                logger.info(f"Attempting to reconnect to {self._last_address}...")
+                # Don't use the public connect() method to avoid recursion issues
+                # Create a new client and attempt connection
+                self.client = BleakClient(self._last_address, disconnected_callback=self._on_disconnect)
+                await self.client.connect()
+                self._connected = True
+                self._reconnecting = False
+                self._retry_count = 0
+                logger.info(f"Successfully reconnected to {self._last_address}")
+                return
+            except Exception as e:
+                logger.warning(f"Reconnection attempt {self._retry_count} failed: {e}")
+
+            # Calculate next delay with exponential backoff
+            delay = min(delay * 2, self.max_retry_delay)
+
+    async def cancel_reconnect(self) -> None:
+        """Cancel any ongoing reconnection attempts."""
+        if self._reconnect_task and not self._reconnect_task.done():
+            logger.info("Cancelling reconnection attempts...")
+            self._reconnect_task.cancel()
+            try:
+                await self._reconnect_task
+            except asyncio.CancelledError:
+                pass
+        self._reconnecting = False
+        self._retry_count = 0
 
     async def scan(self, timeout: float = 10.0) -> List[DeviceInfo]:
         """
@@ -98,11 +232,19 @@ class ThingyBLEClient:
         Returns:
             True if connection successful
         """
+        # Cancel any ongoing reconnection attempts
+        await self.cancel_reconnect()
+
         try:
             logger.info(f"Connecting to {address}...")
-            self.client = BleakClient(address, timeout=timeout)
+            # Create client with disconnect callback
+            self.client = BleakClient(
+                address, timeout=timeout, disconnected_callback=self._on_disconnect
+            )
             await self.client.connect()
             self._connected = True
+            self._last_address = address
+            self._manual_disconnect = False
             logger.info(f"Successfully connected to {address}")
             return True
         except Exception as e:
@@ -114,13 +256,21 @@ class ThingyBLEClient:
         """
         Disconnect from the current device.
 
+        This is a manual disconnect, so auto-reconnect will not be triggered.
+
         Returns:
             True if disconnection successful
         """
+        # Mark as manual disconnect to prevent auto-reconnect
+        self._manual_disconnect = True
+
+        # Cancel any ongoing reconnection attempts
+        await self.cancel_reconnect()
+
         if self.client and self.is_connected:
             try:
                 await self.client.disconnect()
-                logger.info("Disconnected successfully")
+                logger.info("Disconnected successfully (manual)")
             except Exception as e:
                 logger.error(f"Error during disconnect: {e}")
             finally:
@@ -214,7 +364,7 @@ class ThingyBLEClient:
             logger.debug(f"Raw humidity data: {data.hex()} (length: {len(data)})")
 
             if len(data) < 1:
-                logger.error(f"Humidity data empty")
+                logger.error("Humidity data empty")
                 return None
 
             # Humidity is single unsigned byte
@@ -395,6 +545,37 @@ class ThingyBLEClient:
             return True
         except Exception as e:
             logger.error(f"Failed to set LED: {e}")
+            return False
+
+    async def configure_speaker(self, volume: int = 100) -> bool:
+        """
+        Configure speaker settings.
+
+        Args:
+            volume: Speaker volume (0-100)
+
+        Returns:
+            True if successful
+        """
+        if not self.is_connected or self.client is None:
+            raise ConnectionError("Not connected to a device")
+
+        if not 0 <= volume <= 100:
+            raise ValueError("Volume must be between 0 and 100")
+
+        try:
+            # Enable speaker
+            logger.info("Enabling speaker...")
+            await self.client.write_gatt_char(SPEAKER_STATUS_UUID, bytes([1]), response=False)
+            await asyncio.sleep(0.5)
+
+            # Set volume
+            logger.info(f"Setting volume to {volume}%...")
+            await self.client.write_gatt_char(SPEAKER_STATUS_UUID, bytes([volume]), response=False)
+            logger.info("✅ Speaker configured successfully")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to configure speaker: {e}")
             return False
 
     async def play_sound(self, sound_id: int) -> bool:

@@ -95,15 +95,21 @@ async def disconnect_device() -> dict[str, str]:
 
 
 @mcp.tool()
-async def get_device_status() -> ConnectionStatus:
+async def get_device_status() -> dict:
     """
     Get the current device connection status and battery level.
 
     Returns:
-        Connection status including battery level if connected
+        Connection status including battery level, reconnection state, and retry count
     """
     if not ble_client.is_connected:
-        return ConnectionStatus(connected=False)
+        return {
+            "connected": False,
+            "connection_state": ble_client.connection_state,
+            "reconnecting": ble_client.is_reconnecting,
+            "retry_count": ble_client._retry_count if ble_client.is_reconnecting else 0,
+            "last_address": ble_client._last_address,
+        }
 
     # Try to read battery level
     try:
@@ -112,11 +118,56 @@ async def get_device_status() -> ConnectionStatus:
         logger.warning(f"Could not read battery: {e}")
         battery = None
 
-    return ConnectionStatus(
-        connected=True,
-        address=ble_client.client.address if ble_client.client else None,
-        battery_level=battery,
-    )
+    return {
+        "connected": True,
+        "connection_state": ble_client.connection_state,
+        "address": ble_client.client.address if ble_client.client else None,
+        "battery_level": battery,
+        "auto_reconnect_enabled": ble_client.auto_reconnect,
+    }
+
+
+@mcp.tool()
+async def configure_auto_reconnect(
+    enabled: bool, max_attempts: int = 10, initial_delay: float = 1.0, max_delay: float = 30.0
+) -> dict[str, str]:
+    """
+    Configure auto-reconnect settings.
+
+    Args:
+        enabled: Enable or disable auto-reconnect
+        max_attempts: Maximum reconnection attempts (0 = infinite)
+        initial_delay: Initial delay between retries in seconds
+        max_delay: Maximum delay between retries in seconds
+
+    Returns:
+        Status message
+    """
+    ble_client.auto_reconnect = enabled
+    ble_client.max_reconnect_attempts = max_attempts
+    ble_client.initial_retry_delay = initial_delay
+    ble_client.max_retry_delay = max_delay
+
+    return {
+        "status": "success",
+        "message": f"Auto-reconnect {'enabled' if enabled else 'disabled'} "
+        f"(max_attempts={max_attempts}, initial_delay={initial_delay}s, max_delay={max_delay}s)",
+    }
+
+
+@mcp.tool()
+async def cancel_reconnect_attempts() -> dict[str, str]:
+    """
+    Cancel any ongoing reconnection attempts.
+
+    Returns:
+        Status message
+    """
+    if ble_client.is_reconnecting:
+        await ble_client.cancel_reconnect()
+        return {"status": "success", "message": "Reconnection attempts cancelled"}
+    else:
+        return {"status": "info", "message": "No reconnection in progress"}
 
 
 # === Sensor Reading Tools ===
@@ -525,14 +576,15 @@ if __name__ == "__main__":
     logger.info("=" * 70)
     logger.info("Tool registration complete!")
     logger.info("Available tools:")
-    logger.info("  Device Management (4): scan_devices, connect_device, disconnect_device, get_device_status")
+    logger.info("  Device Management (6): scan_devices, connect_device, disconnect_device, get_device_status,")
+    logger.info("                         configure_auto_reconnect, cancel_reconnect_attempts")
     logger.info("  Environmental Sensors (8): read_temperature, read_humidity, read_pressure, read_air_quality,")
     logger.info("                              read_all_sensors, read_color_sensor, read_light_intensity, read_step_count")
     logger.info("  Advanced Motion (6): read_quaternion, read_euler_angles, read_heading,")
     logger.info("                       read_orientation, read_tap_event, read_raw_motion")
     logger.info("  LED Control (3): set_led_color, set_led_breathe, turn_off_led")
     logger.info("  Sound (2): play_sound, beep")
-    logger.info("Total: 23 MCP tools")
+    logger.info("Total: 25 MCP tools")
     logger.info("=" * 70)
     logger.info("Starting FastMCP server...")
     logger.info("Listening for MCP requests from Claude Desktop...")
