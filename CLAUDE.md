@@ -36,37 +36,37 @@ Enable users to control and monitor IoT devices through natural conversation wit
 ## Development Progress
 
 ### 1. Core Implementation
-✅ BLE Communication
+**BLE Communication**
 - Robust device discovery
 - Auto-reconnect capability
 - Connection management
 - Error handling
 
-✅ Sensor Integration
+**Sensor Integration**
 - Environmental readings
 - Motion data processing
 - Real-time monitoring
 - Data validation
 
-✅ Device Control
+**Device Control**
 - LED patterns and effects
 - Sound system with volume
 - Battery monitoring
 - Event handling
 
 ### 2. Feature Demo
-✅ Comprehensive Testing
+**Comprehensive Testing**
 - Environmental sensor demo
 - Motion detection demo
 - LED control patterns
 - Sound system testing
 
 ### 3. Code Organization
-✅ Project Structure
+**Project Structure**
 - `src/` - Core library
-- `tests/` - Unit tests
+- `test_mcp_tools.py` - Comprehensive test suite
+- `PROMPT_GUIDE.md` - Advanced automation examples
 - Documentation
-- Feature demo
 
 ## Technical Details
 

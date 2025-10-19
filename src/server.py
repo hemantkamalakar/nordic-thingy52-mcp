@@ -599,7 +599,7 @@ async def get_connection_status() -> str:
     if not ble_client.is_connected:
         return """# Connection Status
 
-**Status**: ❌ Not Connected
+**Status**: Not Connected
 
 To connect to a device:
 1. Use `scan_devices()` to find nearby Thingy:52 devices
@@ -613,9 +613,9 @@ To connect to a device:
 
     return f"""# Connection Status
 
-**Status**: ✅ Connected
+**Status**: Connected
 **Address**: {ble_client.client.address if ble_client.client else 'Unknown'}
-**Battery Level**: {battery}% {_get_battery_emoji(battery) if battery else ''}
+**Battery Level**: {battery}%
 **Auto-Reconnect**: {'Enabled' if ble_client.auto_reconnect else 'Disabled'}
 **Connection State**: {ble_client.connection_state}
 """
@@ -1096,20 +1096,6 @@ def _assess_air_quality(co2: Optional[int]) -> str:
         return "poor"
     else:
         return "bad"
-
-
-def _get_battery_emoji(level: Optional[int]) -> str:
-    """Get battery emoji based on level."""
-    if level is None:
-        return "❓"
-    elif level > 80:
-        return "🔋"
-    elif level > 50:
-        return "🔋"
-    elif level > 20:
-        return "🪫"
-    else:
-        return "🪫"
 
 
 def main():

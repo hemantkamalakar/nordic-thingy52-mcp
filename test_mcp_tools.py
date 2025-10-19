@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Comprehensive test script for all Nordic Thingy:52 MCP Server tools.
+ Test script for all Nordic Thingy:52 MCP Server tools.
 
 This script tests all 25 MCP tools through direct calls to the server functions.
 It provides detailed output and error reporting for each tool.
@@ -46,7 +46,7 @@ class MCPToolTester:
         print(f"  {title}")
         print(f"{'─' * 70}")
 
-    def print_result(self, tool_name: str, result: Any, status: str = "✅"):
+    def print_result(self, tool_name: str, result: Any, status: str = "[PASS]"):
         """Print tool result."""
         print(f"{status} {tool_name}")
         if isinstance(result, dict):
@@ -67,7 +67,7 @@ class MCPToolTester:
             self.results["passed"].append(name)
             return True
         except Exception as e:
-            self.print_result(name, f"Error: {e}", "❌")
+            self.print_result(name, f"Error: {e}", "[FAIL]")
             self.results["failed"].append((name, str(e)))
             return False
 
@@ -91,11 +91,11 @@ class MCPToolTester:
                 self.device_address = devices[0].address
                 self.results["passed"].append("scan_devices")
             else:
-                self.print_result("scan_devices", "No devices found", "⚠️")
+                self.print_result("scan_devices", "No devices found", "[WARN]")
                 self.results["skipped"].append("scan_devices")
                 return False
         except Exception as e:
-            self.print_result("scan_devices", f"Error: {e}", "❌")
+            self.print_result("scan_devices", f"Error: {e}", "[FAIL]")
             self.results["failed"].append(("scan_devices", str(e)))
             return False
 
@@ -243,7 +243,7 @@ class MCPToolTester:
         self.print_section("Cleanup")
         print("\ndisconnect_device()")
         await disconnect_device()
-        print("✅ Disconnected from device")
+        print("[PASS] Disconnected from device")
 
     def print_summary(self):
         """Print test summary."""
@@ -257,23 +257,23 @@ class MCPToolTester:
         )
 
         print(f"\nTotal Tests: {total}")
-        print(f"✅ Passed: {len(self.results['passed'])}")
-        print(f"❌ Failed: {len(self.results['failed'])}")
-        print(f"⚠️  Skipped: {len(self.results['skipped'])}")
+        print(f"[PASS] Passed: {len(self.results['passed'])}")
+        print(f"[FAIL] Failed: {len(self.results['failed'])}")
+        print(f"[WARN] Skipped: {len(self.results['skipped'])}")
         print(f"\nDuration: {duration.total_seconds():.2f} seconds")
 
         if self.results["failed"]:
             print("\n" + "─" * 70)
             print("Failed Tests:")
             for name, error in self.results["failed"]:
-                print(f"  ❌ {name}")
+                print(f"  [FAIL] {name}")
                 print(f"     Error: {error}")
 
         if self.results["skipped"]:
             print("\n" + "─" * 70)
             print("Skipped Tests:")
             for name in self.results["skipped"]:
-                print(f"  ⚠️  {name}")
+                print(f"  [WARN] {name}")
 
         print("\n" + "=" * 70)
 
@@ -290,7 +290,7 @@ class MCPToolTester:
             # Device Management
             connected = await self.run_device_management_tests()
             if not connected:
-                print("\n❌ Could not connect to device. Stopping tests.")
+                print("\n[FAIL] Could not connect to device. Stopping tests.")
                 return
 
             # Wait a bit for connection to stabilize
@@ -313,9 +313,9 @@ class MCPToolTester:
             await asyncio.sleep(1)
 
         except KeyboardInterrupt:
-            print("\n\n⚠️  Tests interrupted by user")
+            print("\n\n[WARN] Tests interrupted by user")
         except Exception as e:
-            print(f"\n\n❌ Unexpected error: {e}")
+            print(f"\n\n[FAIL] Unexpected error: {e}")
             logger.exception("Test suite error")
         finally:
             # Cleanup
