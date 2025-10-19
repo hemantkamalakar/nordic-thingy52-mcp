@@ -2,11 +2,10 @@
 name = "thingy52-mcp"
 version = "1.0.0"
 description = "MCP server for Nordic Thingy:52 IoT devices"
-authors = [{name = "Your Name", email = "your.email@example.com"}]
+authors = [{name = "Hemant Kamalakar", email = "hemant.kamalakar@gmail.com"}]
 readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}
-
 dependencies = [
     "mcp[cli]>=1.0.0",
     "bleak>=0.21.0",
@@ -16,6 +15,11 @@ dependencies = [
     "python-dateutil>=2.8.0",
     "colorama>=0.4.6",
 ]
+
+[project.urls]
+Homepage = "https://github.com/hemantkamalakar/nordic-thingy52-mcp"
+Repository = "https://github.com/hemantkamalakar/nordic-thingy52-mcp"
+Issues = "https://github.com/hemantkamalakar/nordic-thingy52-mcp/issues"
 
 [project.scripts]
 thingy52-mcp = "src.server:main"
@@ -53,4 +57,4 @@ disallow_untyped_defs = true
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-testpaths = ["tests"]
+testpaths = ["."]

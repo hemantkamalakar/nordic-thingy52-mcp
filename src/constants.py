@@ -51,6 +51,8 @@ LED_MODE_BREATHE = 2
 LED_MODE_ONE_SHOT = 3
 
 # LED color presets (R, G, B)
+# NOTE: These are defined in RGB order for user convenience,
+# but will be sent to device in GRB order (Green, Red, Blue)
 LED_COLORS = {
     "red": (255, 0, 0),
     "green": (0, 255, 0),

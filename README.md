@@ -22,8 +22,8 @@ A production-ready Model Context Protocol (MCP) server that bridges physical sen
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/yourusername/Thingy52MCPServer.git
-   cd Thingy52MCPServer
+   git clone https://github.com/hemantkamalakar/nordic-thingy52-mcp.git
+   cd nordic-thingy52-mcp
    ```
 
 2. **Install dependencies**
@@ -51,7 +51,7 @@ A production-ready Model Context Protocol (MCP) server that bridges physical sen
          "command": "uv",
          "args": [
            "--directory",
-           "/absolute/path/to/Thingy52MCPServer",
+           "/Users/hemantkamalakar/Hemant/Research/Thingy52MCPServer",
            "run",
            "python",
            "run_server.py"
@@ -60,6 +60,8 @@ A production-ready Model Context Protocol (MCP) server that bridges physical sen
      }
    }
    ```
+
+   **Note**: Replace the directory path with your actual installation path. Use absolute paths, not relative paths.
 
 4. **Restart Claude Desktop**
 
@@ -336,7 +338,7 @@ if someone is in the room. Adjust LED color based on occupancy status"
 ## Project Structure
 
 ```
-Thingy52MCPServer/
+nordic-thingy52-mcp/
 ├── README.md                    # This file
 ├── PROMPT_GUIDE.md             # Advanced automation examples
 ├── requirements.txt             # Python dependencies
@@ -451,6 +453,12 @@ Built with:
 - [FastMCP](https://github.com/jlowin/fastmcp) - Fast MCP server framework
 - [Bleak](https://github.com/hbldh/bleak) - Cross-platform BLE library
 - Nordic Semiconductor for the amazing Thingy:52 hardware
+
+## Author
+
+**Hemant Kamalakar**
+- Email: hemant.kamalakar@gmail.com
+- GitHub: [@hemantkamalakar](https://github.com/hemantkamalakar)
 
 ---
 

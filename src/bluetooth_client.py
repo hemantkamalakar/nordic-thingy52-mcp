@@ -825,24 +825,29 @@ class ThingyBLEClient:
             raise ConnectionError("Not connected to a device")
 
         try:
-            # For breathe/one-shot modes, turn off LED first to reset state
-            # This prevents "Writing is not permitted" errors when switching modes
-            if mode in [2, 3]:
-                logger.debug("Turning off LED before setting breathe/one-shot mode")
-                await self.client.write_gatt_char(LED_UUID, bytes([0x00]), response=False)
-                await asyncio.sleep(0.1)
+            # Turn off LED first for all modes except off to ensure clean state transition
+            # This prevents color mixing and ensures the new color is displayed correctly
+            # IMPORTANT: OFF command requires write-with-response!
+            if mode in [1, 2, 3]:
+                logger.debug(f"Turning off LED before setting mode {mode}")
+                await self.client.write_gatt_char(LED_UUID, bytes([0x00]), response=True)
+                await asyncio.sleep(0.15)
 
             if mode == 0:
                 # Turn off LED
                 data = bytes([0x00])
             elif mode == 1:
-                # Constant mode: 4 bytes [mode, R, G, B]
+                # Constant mode: 4 bytes [mode, G, R, B]
+                # NOTE: Nordic Thingy:52 uses GRB byte order, not RGB!
                 # Apply intensity scaling to RGB values
                 r = int(red * intensity / 100)
                 g = int(green * intensity / 100)
                 b = int(blue * intensity / 100)
-                data = bytes([0x01, r, g, b])
-                logger.info(f"LED constant mode: RGB({r},{g},{b})")
+                # Send in GRB order
+                data = bytes([0x01, g, r, b])
+                logger.info(f"LED constant mode: RGB({r},{g},{b}) -> GRB bytes")
+                logger.info(f"LED bytes being sent: {list(data)} = {data.hex()}")
+                logger.info(f"Input values - red:{red}, green:{green}, blue:{blue}, intensity:{intensity}%")
             elif mode == 2:
                 # Breathe mode: 5 bytes [mode, color_code, intensity, delay_lsb, delay_msb]
                 # Ensure delay is at least 50ms (Nordic requirement)
@@ -884,9 +889,15 @@ class ThingyBLEClient:
             else:
                 raise ValueError(f"Invalid LED mode: {mode}. Must be 0-3.")
 
-            # Write to LED characteristic (without response)
-            # Note: Despite Android using WRITE_TYPE_DEFAULT, the characteristic only supports write-without-response
-            await self.client.write_gatt_char(LED_UUID, data, response=False)
+            # Write to LED characteristic
+            # IMPORTANT: Constant mode (1) and OFF (0) require write-with-response
+            # Breathe (2) and One-shot (3) modes use write-without-response
+            use_response = mode in [0, 1]
+            logger.debug(f"Writing LED mode {mode} with response={use_response}")
+            await self.client.write_gatt_char(LED_UUID, data, response=use_response)
+
+            # Small delay after write to ensure it's processed
+            await asyncio.sleep(0.05)
             return True
         except Exception as e:
             logger.error(f"Failed to set LED: {e}")
