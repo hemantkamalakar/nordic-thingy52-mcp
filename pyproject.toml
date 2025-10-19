@@ -17,6 +17,9 @@ dependencies = [
     "colorama>=0.4.6",
 ]
 
+[project.scripts]
+thingy52-mcp = "src.server:main"
+
 [project.optional-dependencies]
 dev = [
     "pytest>=7.4.0",

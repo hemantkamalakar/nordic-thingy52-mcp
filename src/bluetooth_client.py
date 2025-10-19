@@ -11,10 +11,12 @@ from .constants import (
     AIR_QUALITY_UUID,
     BATTERY_LEVEL_UUID,
     COLOR_UUID,
+    ENVIRONMENT_CONFIG_UUID,
     EULER_UUID,
     HEADING_UUID,
     HUMIDITY_UUID,
     LED_UUID,
+    MOTION_CONFIG_UUID,
     ORIENTATION_UUID,
     PRESSURE_UUID,
     QUATERNION_UUID,
@@ -200,15 +202,56 @@ class ThingyBLEClient:
         def detection_callback(device, advertisement_data):
             """Callback to capture device and RSSI."""
             if device.name and any(pattern in device.name for pattern in THINGY_NAME_PATTERNS):
+                logger.debug(f"Found device: {device.name} ({device.address}) RSSI: {advertisement_data.rssi}")
                 discovered_devices[device.address] = {
                     "device": device,
                     "rssi": advertisement_data.rssi
                 }
 
-        scanner = BleakScanner(detection_callback=detection_callback)
-        await scanner.start()
-        await asyncio.sleep(timeout)
-        await scanner.stop()
+        try:
+            # Create scanner with detection callback
+            scanner = BleakScanner(detection_callback=detection_callback)
+            
+            # Start scanning with timeout protection
+            logger.debug("Starting BLE scan...")
+            try:
+                await asyncio.wait_for(scanner.start(), timeout=5.0)
+            except asyncio.TimeoutError:
+                logger.error("Timeout while starting BLE scan")
+                return []
+            except Exception as e:
+                logger.error(f"Error starting BLE scan: {e}")
+                return []
+            
+            # Wait for scan duration
+            try:
+                await asyncio.sleep(timeout)
+            except asyncio.CancelledError:
+                logger.warning("Scan interrupted")
+            finally:
+                # Always attempt to stop scanner
+                try:
+                    await asyncio.wait_for(scanner.stop(), timeout=5.0)
+                except asyncio.TimeoutError:
+                    logger.warning("Timeout while stopping BLE scan")
+                except Exception as e:
+                    logger.warning(f"Error stopping BLE scan: {e}")
+
+            # Process discovered devices
+            thingy_devices = []
+            for address, info in discovered_devices.items():
+                device = info["device"]
+                rssi = info["rssi"]
+                thingy_devices.append(
+                    DeviceInfo(address=device.address, name=device.name, rssi=rssi)
+                )
+                logger.info(f"Found Thingy: {device.name} ({device.address}) RSSI: {rssi}")
+
+            return thingy_devices
+
+        except Exception as e:
+            logger.error(f"Error during BLE scan: {e}")
+            return []
 
         thingy_devices = []
         for address, info in discovered_devices.items():
@@ -290,35 +333,62 @@ class ThingyBLEClient:
             Received data or None on timeout
         """
         if not self.is_connected or self.client is None:
-            raise ConnectionError("Not connected to a device")
+            logger.error("Cannot read notifications: not connected to device")
+            return None
 
         self._notification_data = None
         self._notification_event = asyncio.Event()
 
         def notification_handler(sender, data):
             """Handle incoming notification."""
+            logger.debug(f"Received notification from {char_uuid}: {data.hex()}")
             self._notification_data = data
             if self._notification_event:
                 self._notification_event.set()
 
         try:
-            # Subscribe to notifications
-            await self.client.start_notify(char_uuid, notification_handler)
+            # Subscribe to notifications with timeout
+            try:
+                logger.debug(f"Subscribing to notifications for {char_uuid}")
+                await asyncio.wait_for(
+                    self.client.start_notify(char_uuid, notification_handler),
+                    timeout=5.0
+                )
+            except asyncio.TimeoutError:
+                logger.error(f"Timeout subscribing to notifications for {char_uuid}")
+                return None
+            except Exception as e:
+                logger.error(f"Error subscribing to notifications for {char_uuid}: {e}")
+                return None
 
             # Wait for notification with timeout
             try:
+                logger.debug(f"Waiting for notification from {char_uuid} (timeout: {timeout}s)")
                 await asyncio.wait_for(self._notification_event.wait(), timeout=timeout)
                 data = self._notification_data
+                if data is None:
+                    logger.warning(f"Received empty notification from {char_uuid}")
+                return data
             except asyncio.TimeoutError:
                 logger.warning(f"Timeout waiting for notification from {char_uuid}")
-                data = None
+                return None
+            except Exception as e:
+                logger.error(f"Error receiving notification from {char_uuid}: {e}")
+                return None
             finally:
-                # Stop notifications
-                await self.client.stop_notify(char_uuid)
-
-            return data
+                # Always try to unsubscribe from notifications
+                try:
+                    logger.debug(f"Unsubscribing from notifications for {char_uuid}")
+                    await asyncio.wait_for(
+                        self.client.stop_notify(char_uuid),
+                        timeout=5.0
+                    )
+                except asyncio.TimeoutError:
+                    logger.warning(f"Timeout unsubscribing from notifications for {char_uuid}")
+                except Exception as e:
+                    logger.warning(f"Error unsubscribing from notifications for {char_uuid}: {e}")
         except Exception as e:
-            logger.error(f"Failed to read via notification from {char_uuid}: {e}")
+            logger.error(f"Critical error in notification handling for {char_uuid}: {e}")
             return None
 
     async def read_temperature(self) -> Optional[float]:
@@ -393,34 +463,115 @@ class ThingyBLEClient:
                 logger.error(f"Pressure data too short: expected 5 bytes, got {len(data)}")
                 return None
 
-            # Pressure: integer (4 bytes) + decimal (1 byte) in Pascal
-            integer = int.from_bytes(data[0:4], "little", signed=False)
+            # Pressure format: integer (4 bytes little-endian) + decimal (1 byte)
+            # The value is already in hPa (hectopascals), not Pascals
+            integer = int.from_bytes(data[0:4], "little", signed=True)
             decimal = data[4]
-            pressure_pa = float(f"{integer}.{decimal:02d}")
-            # Convert to hPa
-            pressure_hpa = pressure_pa / 100.0
-            logger.info(f"Pressure: {pressure_hpa} hPa")
+            # Combine: integer part + decimal part (0-99 range)
+            pressure_hpa = integer + (decimal / 100.0)
+            logger.info(f"Pressure: {pressure_hpa} hPa (raw: int={integer}, dec={decimal})")
             return pressure_hpa
         except Exception as e:
             logger.error(f"Failed to read pressure: {e}", exc_info=True)
             return None
 
-    async def read_air_quality(self) -> tuple[Optional[int], Optional[int]]:
-        """Read air quality sensor (CO2 and TVOC) via notification."""
+    async def configure_environment_sensors(
+        self,
+        temp_interval_ms: int = 1000,
+        pressure_interval_ms: int = 1000,
+        humidity_interval_ms: int = 1000,
+        color_interval_ms: int = 1000,
+        gas_mode: int = 1,  # 1=1s, 2=10s, 3=60s
+    ) -> bool:
+        """
+        Configure environment sensor parameters.
+
+        Args:
+            temp_interval_ms: Temperature update interval in milliseconds
+            pressure_interval_ms: Pressure update interval in milliseconds
+            humidity_interval_ms: Humidity update interval in milliseconds
+            color_interval_ms: Color sensor update interval in milliseconds
+            gas_mode: Gas sensor mode (1=1s, 2=10s, 3=60s intervals)
+
+        Returns:
+            True if successful
+        """
         if not self.is_connected or self.client is None:
             raise ConnectionError("Not connected to a device")
 
         try:
+            # Environment config format: 8 bytes
+            # Bytes 0-1: Temperature interval (uint16 little-endian)
+            # Bytes 2-3: Pressure interval (uint16 little-endian)
+            # Bytes 4-5: Humidity interval (uint16 little-endian)
+            # Bytes 6-7: Color interval (uint16 little-endian)
+            # Byte 8: Gas sensor mode (uint8)
+
+            config = bytearray(9)
+            config[0:2] = temp_interval_ms.to_bytes(2, "little")
+            config[2:4] = pressure_interval_ms.to_bytes(2, "little")
+            config[4:6] = humidity_interval_ms.to_bytes(2, "little")
+            config[6:8] = color_interval_ms.to_bytes(2, "little")
+            config[8] = gas_mode
+
+            await self.client.write_gatt_char(ENVIRONMENT_CONFIG_UUID, bytes(config), response=False)
+            logger.info(
+                f"Environment sensors configured: temp={temp_interval_ms}ms, "
+                f"pressure={pressure_interval_ms}ms, humidity={humidity_interval_ms}ms, "
+                f"color={color_interval_ms}ms, gas_mode={gas_mode}"
+            )
+            return True
+        except Exception as e:
+            logger.error(f"Failed to configure environment sensors: {e}")
+            return False
+
+    async def read_air_quality(self) -> tuple[Optional[int], Optional[int]]:
+        """
+        Read air quality sensor (CO2 and TVOC) via notification.
+
+        IMPORTANT: CCS811 Gas Sensor Warm-up Requirements
+        --------------------------------------------------
+        The Thingy:52 uses a CCS811 gas sensor which requires significant warm-up time:
+
+        - First-time use: 20 minutes to 48 hours for initial calibration
+        - After power cycle: 30+ minutes to restore baseline
+        - For accurate readings: >100 hours of continuous operation recommended
+        - Baseline calibration: Sensor learns air quality baseline over time
+
+        If you see 0 values for CO2/TVOC, this is NORMAL during warm-up period.
+        Leave the device powered on for at least 30-60 minutes before expecting
+        accurate readings.
+
+        Returns:
+            Tuple of (CO2 in ppm, TVOC in ppb)
+        """
+        if not self.is_connected or self.client is None:
+            raise ConnectionError("Not connected to a device")
+
+        try:
+            # Configure environment sensors with gas mode for faster readings
+            await self.configure_environment_sensors(gas_mode=1)  # 1 second mode
+            await asyncio.sleep(1.5)  # Give gas sensor time to warm up
+
             data = await self._read_via_notification(AIR_QUALITY_UUID, timeout=5.0)
 
             if data is None:
                 logger.error("No air quality data received")
                 return (None, None)
 
-            # CO2 (eCO2): 2 bytes, TVOC: 2 bytes
+            # CO2 (eCO2): 2 bytes little-endian, TVOC: 2 bytes little-endian
             co2 = int.from_bytes(data[0:2], "little", signed=False)
             tvoc = int.from_bytes(data[2:4], "little", signed=False)
-            logger.debug(f"Air quality - CO2: {co2} ppm, TVOC: {tvoc} ppb")
+
+            # Log with context about sensor warm-up
+            if co2 == 0 and tvoc == 0:
+                logger.info(
+                    f"Air quality - CO2: {co2} ppm, TVOC: {tvoc} ppb "
+                    "(Note: 0 values indicate sensor is warming up - wait 30-60 minutes)"
+                )
+            else:
+                logger.info(f"Air quality - CO2: {co2} ppm, TVOC: {tvoc} ppb")
+
             return (co2, tvoc)
         except Exception as e:
             logger.error(f"Failed to read air quality: {e}")
@@ -478,12 +629,65 @@ class ThingyBLEClient:
             logger.error(f"Failed to read battery: {e}")
             return None
 
+    async def configure_motion_sensors(
+        self,
+        step_interval_ms: int = 1000,
+        temp_comp_interval_ms: int = 5000,
+        mag_comp_interval_ms: int = 5000,
+        motion_freq_hz: int = 200,
+        wake_on_motion: bool = True,
+    ) -> bool:
+        """
+        Configure motion sensor parameters.
+
+        Args:
+            step_interval_ms: Step counter update interval in milliseconds
+            temp_comp_interval_ms: Temperature compensation interval in milliseconds
+            mag_comp_interval_ms: Magnetometer compensation interval in milliseconds
+            motion_freq_hz: Motion processing frequency in Hz (max 200Hz)
+            wake_on_motion: Enable wake on motion
+
+        Returns:
+            True if successful
+        """
+        if not self.is_connected or self.client is None:
+            raise ConnectionError("Not connected to a device")
+
+        try:
+            # Motion config format: 9 bytes
+            # Bytes 0-1: Step counter interval (uint16 little-endian)
+            # Bytes 2-3: Temp compensation interval (uint16 little-endian)
+            # Bytes 4-5: Mag compensation interval (uint16 little-endian)
+            # Bytes 6-7: Motion frequency (uint16 little-endian)
+            # Byte 8: Wake on motion (uint8)
+
+            config = bytearray(9)
+            config[0:2] = step_interval_ms.to_bytes(2, "little")
+            config[2:4] = temp_comp_interval_ms.to_bytes(2, "little")
+            config[4:6] = mag_comp_interval_ms.to_bytes(2, "little")
+            config[6:8] = motion_freq_hz.to_bytes(2, "little")
+            config[8] = 1 if wake_on_motion else 0
+
+            await self.client.write_gatt_char(MOTION_CONFIG_UUID, bytes(config), response=False)
+            logger.info(
+                f"Motion sensors configured: step={step_interval_ms}ms, "
+                f"freq={motion_freq_hz}Hz, wake={wake_on_motion}"
+            )
+            return True
+        except Exception as e:
+            logger.error(f"Failed to configure motion sensors: {e}")
+            return False
+
     async def read_step_count(self) -> Optional[int]:
         """Read step counter via notification."""
         if not self.is_connected or self.client is None:
             raise ConnectionError("Not connected to a device")
 
         try:
+            # Ensure motion sensors are configured
+            await self.configure_motion_sensors()
+            await asyncio.sleep(0.5)  # Give sensors time to initialize
+
             data = await self._read_via_notification(STEP_COUNTER_UUID, timeout=5.0)
 
             if data is None:
@@ -539,8 +743,9 @@ class ThingyBLEClient:
 
             # LED data format: mode (1 byte) + R (1) + G (1) + B (1) = 4 bytes total
             # Note: Thingy:52 LED characteristic expects exactly 4 bytes
+            # Use write-without-response as the LED characteristic doesn't support write-with-response
             data = bytes([mode, r, g, b])
-            await self.client.write_gatt_char(LED_UUID, data)
+            await self.client.write_gatt_char(LED_UUID, data, response=False)
             logger.info(f"LED set to RGB({r},{g},{b}) mode={mode}")
             return True
         except Exception as e:
@@ -724,6 +929,10 @@ class ThingyBLEClient:
             raise ConnectionError("Not connected to a device")
 
         try:
+            # Ensure motion sensors are configured
+            await self.configure_motion_sensors()
+            await asyncio.sleep(0.5)  # Give sensors time to initialize
+
             data = await self._read_via_notification(ORIENTATION_UUID, timeout=5.0)
 
             if data is None:
@@ -752,6 +961,10 @@ class ThingyBLEClient:
             raise ConnectionError("Not connected to a device")
 
         try:
+            # Ensure motion sensors are configured
+            await self.configure_motion_sensors()
+            await asyncio.sleep(0.5)  # Give sensors time to initialize
+
             data = await self._read_via_notification(RAW_DATA_UUID, timeout=5.0)
 
             if data is None:
