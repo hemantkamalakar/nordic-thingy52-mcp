@@ -7,7 +7,7 @@ from typing import List, Optional, Union
 from mcp.server.fastmcp import FastMCP
 
 from .bluetooth_client import ThingyBLEClient
-from .constants import LED_COLORS, LED_MODE_BREATHE, LED_MODE_CONSTANT
+from .constants import LED_COLORS, LED_MODE_BREATHE, LED_MODE_CONSTANT, LED_MODE_OFF
 from .models import ConnectionStatus, DeviceInfo, EnvironmentalData
 
 # Configure logging with more visible format
@@ -521,7 +521,7 @@ async def turn_off_led() -> dict[str, str]:
     Returns:
         Status message
     """
-    success = await ble_client.set_led(LED_MODE_CONSTANT, 0, 0, 0, 0)
+    success = await ble_client.set_led(LED_MODE_OFF, 0, 0, 0)
 
     if success:
         return {"status": "success", "message": "LED turned off"}
@@ -534,13 +534,14 @@ async def turn_off_led() -> dict[str, str]:
 logger.info("Registering resources...")
 
 
-@mcp.resource("thingy://device/info")
+@mcp.resource(
+    "thingy://device/info",
+    name="Device Information",
+    description="Nordic Thingy:52 device capabilities, sensors, and specifications",
+    mime_type="text/markdown"
+)
 def get_device_info() -> str:
-    """
-    Get information about the Nordic Thingy:52 device.
-
-    Returns detailed information about device capabilities, sensors, and specifications.
-    """
+    """Get information about the Nordic Thingy:52 device."""
     return """# Nordic Thingy:52 Device Information
 
 ## Overview
@@ -587,13 +588,14 @@ The Nordic Thingy:52 is a compact IoT prototyping platform with multiple sensors
 """
 
 
-@mcp.resource("thingy://connection/status")
+@mcp.resource(
+    "thingy://connection/status",
+    name="Connection Status",
+    description="Real-time connection status and device information",
+    mime_type="text/markdown"
+)
 async def get_connection_status() -> str:
-    """
-    Get current connection status and device information.
-
-    Returns real-time connection information.
-    """
+    """Get current connection status and device information."""
     if not ble_client.is_connected:
         return """# Connection Status
 
@@ -619,13 +621,14 @@ To connect to a device:
 """
 
 
-@mcp.resource("thingy://sensors/guide")
+@mcp.resource(
+    "thingy://sensors/guide",
+    name="Sensor Reading Guide",
+    description="Guide for reading sensors and interpreting sensor values",
+    mime_type="text/markdown"
+)
 def get_sensor_guide() -> str:
-    """
-    Get a guide for reading sensors and interpreting values.
-
-    Returns usage guide for all sensors.
-    """
+    """Get a guide for reading sensors and interpreting values."""
     return """# Sensor Reading Guide
 
 ## Environmental Sensors
@@ -724,21 +727,27 @@ turn_off_led()
 ### Sound IDs
 - 1-8: Various preset sounds and melodies
 
+### Important Notes
+- Volume control is NOT available for preset sounds (sample mode)
+- Preset sounds play at a fixed volume
+- Volume control only works in frequency mode
+
 ### Usage
 ```
-play_sound(sound_id=1)
-beep()  # Quick beep
+play_sound(sound_id=1)  # Play preset sound 1
+beep()  # Quick beep (uses sound 1)
 ```
 """
 
 
-@mcp.resource("thingy://examples/automation")
+@mcp.resource(
+    "thingy://examples/automation",
+    name="Automation Examples",
+    description="Practical automation scenarios and examples for the Thingy:52",
+    mime_type="text/markdown"
+)
 def get_automation_examples() -> str:
-    """
-    Get examples of automation scenarios with the Thingy:52.
-
-    Returns practical automation examples.
-    """
+    """Get examples of automation scenarios with the Thingy:52."""
     return """# Automation Examples
 
 ## Air Quality Monitoring
@@ -1025,10 +1034,17 @@ logger.info("Registering sound control tools...")
 @mcp.tool()
 async def play_sound(sound_id: int) -> dict[str, str]:
     """
-    Play a preset sound from the Thingy speaker.
+    Play a preset sound sample from the Thingy speaker.
+
+    The Thingy:52 has 8 preset sound samples stored in the device firmware.
+    Each sound ID plays a different preset sound effect or tone.
+
+    NOTE: Volume control is not available for preset sounds. They play at a fixed volume.
+    Only frequency mode supports volume control.
 
     Args:
-        sound_id: Sound ID number (1-8)
+        sound_id: Sound sample selector (1-8)
+            1-8: Different preset sound samples
 
     Returns:
         Status message
@@ -1039,7 +1055,7 @@ async def play_sound(sound_id: int) -> dict[str, str]:
     success = await ble_client.play_sound(sound_id)
 
     if success:
-        return {"status": "success", "message": f"Playing sound {sound_id}"}
+        return {"status": "success", "message": f"Playing sound sample {sound_id}"}
     else:
         return {"status": "error", "message": "Failed to play sound"}
 
@@ -1048,6 +1064,8 @@ async def play_sound(sound_id: int) -> dict[str, str]:
 async def beep() -> dict[str, str]:
     """
     Play a quick beep sound.
+
+    Uses preset sound sample 1 for the beep.
 
     Returns:
         Status message

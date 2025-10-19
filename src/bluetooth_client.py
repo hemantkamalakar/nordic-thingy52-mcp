@@ -21,6 +21,7 @@ from .constants import (
     PRESSURE_UUID,
     QUATERNION_UUID,
     RAW_DATA_UUID,
+    SPEAKER_CONFIG_UUID,
     SPEAKER_DATA_UUID,
     SPEAKER_STATUS_UUID,
     STEP_COUNTER_UUID,
@@ -477,21 +478,24 @@ class ThingyBLEClient:
 
     async def configure_environment_sensors(
         self,
-        temp_interval_ms: int = 1000,
-        pressure_interval_ms: int = 1000,
-        humidity_interval_ms: int = 1000,
-        color_interval_ms: int = 1000,
-        gas_mode: int = 1,  # 1=1s, 2=10s, 3=60s
+        temp_interval_ms: Optional[int] = None,
+        pressure_interval_ms: Optional[int] = None,
+        humidity_interval_ms: Optional[int] = None,
+        color_interval_ms: Optional[int] = None,
+        gas_mode: Optional[int] = None,
     ) -> bool:
         """
-        Configure environment sensor parameters.
+        Configure environment sensor parameters using read-modify-write pattern.
+
+        This uses the same approach as the Nordic Node.js library: read current config,
+        modify only the requested parameters, then write back.
 
         Args:
-            temp_interval_ms: Temperature update interval in milliseconds
-            pressure_interval_ms: Pressure update interval in milliseconds
-            humidity_interval_ms: Humidity update interval in milliseconds
-            color_interval_ms: Color sensor update interval in milliseconds
-            gas_mode: Gas sensor mode (1=1s, 2=10s, 3=60s intervals)
+            temp_interval_ms: Temperature update interval in milliseconds (optional)
+            pressure_interval_ms: Pressure update interval in milliseconds (optional)
+            humidity_interval_ms: Humidity update interval in milliseconds (optional)
+            color_interval_ms: Color sensor update interval in milliseconds (optional)
+            gas_mode: Gas sensor mode - 1=1s, 2=10s, 3=60s intervals (optional)
 
         Returns:
             True if successful
@@ -500,25 +504,59 @@ class ThingyBLEClient:
             raise ConnectionError("Not connected to a device")
 
         try:
-            # Environment config format: 8 bytes
+            # Read current configuration (read-modify-write pattern)
+            try:
+                current_config = await self.client.read_gatt_char(ENVIRONMENT_CONFIG_UUID)
+                config = bytearray(current_config)
+                logger.debug(f"Current environment config: {config.hex()}")
+            except Exception as e:
+                logger.warning(f"Could not read current config, using defaults: {e}")
+                # If read fails, create default config
+                config = bytearray(9)
+                config[0:2] = (1000).to_bytes(2, "little")  # temp: 1000ms
+                config[2:4] = (1000).to_bytes(2, "little")  # pressure: 1000ms
+                config[4:6] = (1000).to_bytes(2, "little")  # humidity: 1000ms
+                config[6:8] = (1000).to_bytes(2, "little")  # color: 1000ms
+                config[8] = 1  # gas mode: 1s
+
+            # Ensure config is at least 9 bytes
+            if len(config) < 9:
+                # Pad with default values if needed
+                while len(config) < 9:
+                    config.append(0)
+
+            # Environment config format (Nordic Thingy:52 specification):
             # Bytes 0-1: Temperature interval (uint16 little-endian)
             # Bytes 2-3: Pressure interval (uint16 little-endian)
             # Bytes 4-5: Humidity interval (uint16 little-endian)
             # Bytes 6-7: Color interval (uint16 little-endian)
-            # Byte 8: Gas sensor mode (uint8)
+            # Byte 8: Gas sensor mode (uint8: 1, 2, or 3)
 
-            config = bytearray(9)
-            config[0:2] = temp_interval_ms.to_bytes(2, "little")
-            config[2:4] = pressure_interval_ms.to_bytes(2, "little")
-            config[4:6] = humidity_interval_ms.to_bytes(2, "little")
-            config[6:8] = color_interval_ms.to_bytes(2, "little")
-            config[8] = gas_mode
+            # Modify only the parameters that were provided
+            if temp_interval_ms is not None:
+                config[0:2] = temp_interval_ms.to_bytes(2, "little")
+            if pressure_interval_ms is not None:
+                config[2:4] = pressure_interval_ms.to_bytes(2, "little")
+            if humidity_interval_ms is not None:
+                config[4:6] = humidity_interval_ms.to_bytes(2, "little")
+            if color_interval_ms is not None:
+                config[6:8] = color_interval_ms.to_bytes(2, "little")
+            if gas_mode is not None:
+                if gas_mode not in [1, 2, 3]:
+                    raise ValueError("Gas mode must be 1, 2, or 3")
+                config[8] = gas_mode
 
+            # Write back the modified configuration
             await self.client.write_gatt_char(ENVIRONMENT_CONFIG_UUID, bytes(config), response=False)
+
+            logger.debug(f"Environment config written: {config.hex()}")
             logger.info(
-                f"Environment sensors configured: temp={temp_interval_ms}ms, "
-                f"pressure={pressure_interval_ms}ms, humidity={humidity_interval_ms}ms, "
-                f"color={color_interval_ms}ms, gas_mode={gas_mode}"
+                f"Environment sensors configured: "
+                f"temp={int.from_bytes(config[0:2], 'little')}ms, "
+                f"pressure={int.from_bytes(config[2:4], 'little')}ms, "
+                f"humidity={int.from_bytes(config[4:6], 'little')}ms, "
+                f"color={int.from_bytes(config[6:8], 'little')}ms, "
+                f"gas_mode={config[8]}"
             )
             return True
         except Exception as e:
@@ -559,7 +597,15 @@ class ThingyBLEClient:
                 logger.error("No air quality data received")
                 return (None, None)
 
-            # CO2 (eCO2): 2 bytes little-endian, TVOC: 2 bytes little-endian
+            logger.debug(f"Raw air quality data: {data.hex()} (length: {len(data)})")
+
+            if len(data) < 4:
+                logger.error(f"Air quality data too short: expected 4 bytes, got {len(data)}")
+                return (None, None)
+
+            # Air quality format (CCS811 sensor):
+            # Bytes 0-1: eCO2 (equivalent CO2) in ppm - uint16 little-endian
+            # Bytes 2-3: TVOC (Total Volatile Organic Compounds) in ppb - uint16 little-endian
             co2 = int.from_bytes(data[0:2], "little", signed=False)
             tvoc = int.from_bytes(data[2:4], "little", signed=False)
 
@@ -715,19 +761,62 @@ class ThingyBLEClient:
             temperature=temp, humidity=humidity, pressure=pressure, co2=co2, tvoc=tvoc
         )
 
-    async def set_led(
-        self, mode: int, red: int, green: int, blue: int, intensity: int = 100, delay: int = 0
-    ) -> bool:
+    def _rgb_to_color_code(self, red: int, green: int, blue: int) -> int:
         """
-        Set LED color and mode.
+        Convert RGB values to Nordic Thingy:52 color code.
+
+        Color codes:
+        0x01 = RED, 0x02 = GREEN, 0x03 = YELLOW, 0x04 = BLUE,
+        0x05 = PURPLE, 0x06 = CYAN, 0x07 = WHITE
 
         Args:
-            mode: 1=constant, 2=breathe, 3=one-shot
             red: Red value (0-255)
             green: Green value (0-255)
             blue: Blue value (0-255)
-            intensity: Brightness (0-100)
-            delay: Delay in ms for breathe/one-shot modes (ignored - not supported by Thingy LED characteristic)
+
+        Returns:
+            Color code (1-7)
+        """
+        # Define standard colors as (R, G, B) tuples
+        colors = {
+            0x01: (255, 0, 0),      # RED
+            0x02: (0, 255, 0),      # GREEN
+            0x03: (255, 255, 0),    # YELLOW
+            0x04: (0, 0, 255),      # BLUE
+            0x05: (255, 0, 255),    # PURPLE/MAGENTA
+            0x06: (0, 255, 255),    # CYAN
+            0x07: (255, 255, 255),  # WHITE
+        }
+
+        # Find the closest color using Euclidean distance
+        min_distance = float('inf')
+        closest_code = 0x01
+
+        for code, (r, g, b) in colors.items():
+            distance = ((red - r) ** 2 + (green - g) ** 2 + (blue - b) ** 2) ** 0.5
+            if distance < min_distance:
+                min_distance = distance
+                closest_code = code
+
+        return closest_code
+
+    async def set_led(
+        self, mode: int, red: int, green: int, blue: int, intensity: int = 100, delay: int = 1000
+    ) -> bool:
+        """
+        Set LED color and mode according to Nordic Thingy:52 specification.
+
+        Args:
+            mode: LED mode
+                0 = Off
+                1 = Constant (uses RGB values directly)
+                2 = Breathe (uses color code + intensity + delay)
+                3 = One-shot (uses color code + intensity + delay)
+            red: Red value (0-255)
+            green: Green value (0-255)
+            blue: Blue value (0-255)
+            intensity: Brightness (0-100) for breathe/one-shot, scaling for constant
+            delay: Delay in ms for breathe/one-shot modes (minimum 50ms)
 
         Returns:
             True if successful
@@ -736,28 +825,93 @@ class ThingyBLEClient:
             raise ConnectionError("Not connected to a device")
 
         try:
-            # Apply intensity scaling
-            r = int(red * intensity / 100)
-            g = int(green * intensity / 100)
-            b = int(blue * intensity / 100)
+            # For breathe/one-shot modes, turn off LED first to reset state
+            # This prevents "Writing is not permitted" errors when switching modes
+            if mode in [2, 3]:
+                logger.debug("Turning off LED before setting breathe/one-shot mode")
+                await self.client.write_gatt_char(LED_UUID, bytes([0x00]), response=False)
+                await asyncio.sleep(0.1)
 
-            # LED data format: mode (1 byte) + R (1) + G (1) + B (1) = 4 bytes total
-            # Note: Thingy:52 LED characteristic expects exactly 4 bytes
-            # Use write-without-response as the LED characteristic doesn't support write-with-response
-            data = bytes([mode, r, g, b])
+            if mode == 0:
+                # Turn off LED
+                data = bytes([0x00])
+            elif mode == 1:
+                # Constant mode: 4 bytes [mode, R, G, B]
+                # Apply intensity scaling to RGB values
+                r = int(red * intensity / 100)
+                g = int(green * intensity / 100)
+                b = int(blue * intensity / 100)
+                data = bytes([0x01, r, g, b])
+                logger.info(f"LED constant mode: RGB({r},{g},{b})")
+            elif mode == 2:
+                # Breathe mode: 5 bytes [mode, color_code, intensity, delay_lsb, delay_msb]
+                # Ensure delay is at least 50ms (Nordic requirement)
+                delay = max(50, delay)
+
+                # Convert RGB to color code
+                color_code = self._rgb_to_color_code(red, green, blue)
+
+                # Scale intensity to 0-255 range
+                intensity_byte = int(intensity * 255 / 100)
+
+                # Convert delay to little-endian uint16
+                delay_bytes = delay.to_bytes(2, 'little')
+
+                data = bytes([mode, color_code, intensity_byte, delay_bytes[0], delay_bytes[1]])
+
+                color_names = {
+                    0x01: "RED", 0x02: "GREEN", 0x03: "YELLOW", 0x04: "BLUE",
+                    0x05: "PURPLE", 0x06: "CYAN", 0x07: "WHITE"
+                }
+                logger.info(f"LED Breathe mode: {color_names.get(color_code, 'UNKNOWN')} "
+                           f"intensity={intensity}% delay={delay}ms")
+            elif mode == 3:
+                # One-shot mode: 3 bytes [mode, color_code, intensity]
+                # Convert RGB to color code
+                color_code = self._rgb_to_color_code(red, green, blue)
+
+                # Scale intensity to 0-255 range
+                intensity_byte = int(intensity * 255 / 100)
+
+                data = bytes([mode, color_code, intensity_byte])
+
+                color_names = {
+                    0x01: "RED", 0x02: "GREEN", 0x03: "YELLOW", 0x04: "BLUE",
+                    0x05: "PURPLE", 0x06: "CYAN", 0x07: "WHITE"
+                }
+                logger.info(f"LED One-shot mode: {color_names.get(color_code, 'UNKNOWN')} "
+                           f"intensity={intensity}%")
+            else:
+                raise ValueError(f"Invalid LED mode: {mode}. Must be 0-3.")
+
+            # Write to LED characteristic (without response)
+            # Note: Despite Android using WRITE_TYPE_DEFAULT, the characteristic only supports write-without-response
             await self.client.write_gatt_char(LED_UUID, data, response=False)
-            logger.info(f"LED set to RGB({r},{g},{b}) mode={mode}")
             return True
         except Exception as e:
             logger.error(f"Failed to set LED: {e}")
             return False
 
-    async def configure_speaker(self, volume: int = 100) -> bool:
+    async def configure_speaker(self, speaker_mode: int = 0x03, microphone_mode: int = 0x01) -> bool:
         """
-        Configure speaker settings.
+        Configure speaker and microphone modes.
+
+        Nordic Thingy:52 configuration format (from Android app):
+        - Byte 0: Speaker mode
+        - Byte 1: Microphone mode
+
+        Speaker modes:
+        - 0x01: Frequency mode (plays tones at specific frequencies)
+        - 0x02: PCM mode (for audio streaming, 8kHz sample rate)
+        - 0x03: Sample mode (plays preset sound samples using sample IDs 1-8)
+
+        Microphone modes:
+        - 0x01: ADPCM mode (compressed audio)
+        - 0x02: SPL mode (Sound Pressure Level)
 
         Args:
-            volume: Speaker volume (0-100)
+            speaker_mode: Speaker mode (0x01=frequency, 0x02=PCM, 0x03=sample)
+            microphone_mode: Microphone mode (0x01=ADPCM, 0x02=SPL)
 
         Returns:
             True if successful
@@ -765,30 +919,43 @@ class ThingyBLEClient:
         if not self.is_connected or self.client is None:
             raise ConnectionError("Not connected to a device")
 
-        if not 0 <= volume <= 100:
-            raise ValueError("Volume must be between 0 and 100")
+        if speaker_mode not in [0x01, 0x02, 0x03]:
+            raise ValueError("Speaker mode must be 0x01, 0x02, or 0x03")
+
+        if microphone_mode not in [0x01, 0x02]:
+            raise ValueError("Microphone mode must be 0x01 or 0x02")
 
         try:
-            # Enable speaker
-            logger.info("Enabling speaker...")
-            await self.client.write_gatt_char(SPEAKER_STATUS_UUID, bytes([1]), response=False)
-            await asyncio.sleep(0.5)
+            # Nordic Thingy:52 sound configuration format (matches Android app)
+            # Byte 0: Speaker mode
+            # Byte 1: Microphone mode
+            # NOTE: Volume is NOT part of configuration! It goes in speaker data for frequency mode.
+            config = bytes([speaker_mode, microphone_mode])
 
-            # Set volume
-            logger.info(f"Setting volume to {volume}%...")
-            await self.client.write_gatt_char(SPEAKER_STATUS_UUID, bytes([volume]), response=False)
-            logger.info("✅ Speaker configured successfully")
+            logger.debug(f"Writing sound config: [0x{speaker_mode:02X}, 0x{microphone_mode:02X}] to {SPEAKER_CONFIG_UUID}")
+            # Use write-with-response since the characteristic supports it
+            await self.client.write_gatt_char(SPEAKER_CONFIG_UUID, config, response=True)
+            logger.debug("Sound configuration written successfully")
+            # Increased delay for better reliability
+            await asyncio.sleep(0.2)
             return True
         except Exception as e:
-            logger.error(f"Failed to configure speaker: {e}")
+            logger.error(f"Failed to configure speaker: {e}", exc_info=True)
             return False
 
     async def play_sound(self, sound_id: int) -> bool:
         """
-        Play a preset sound.
+        Play a preset sound using sample mode (matches Android app implementation).
+
+        Nordic Thingy:52 has 8 preset sound samples stored in firmware.
+        This function uses sample mode (0x03) to play preset sounds.
+
+        NOTE: Volume control is not available for sample mode! Volume only applies
+        to frequency mode. Preset samples play at a fixed volume.
 
         Args:
-            sound_id: Sound ID (1-8)
+            sound_id: Sound sample ID (1-8)
+                Each ID corresponds to a different preset sound/melody
 
         Returns:
             True if successful
@@ -800,14 +967,30 @@ class ThingyBLEClient:
             raise ValueError("Sound ID must be between 1 and 8")
 
         try:
-            # Speaker data format: sound_id (1 byte)
-            data = bytes([sound_id])
-            # Speaker characteristic requires write-without-response
-            await self.client.write_gatt_char(SPEAKER_DATA_UUID, data, response=False)
-            logger.info(f"Playing sound {sound_id}")
+            # Configure speaker to sample mode (0x03) with ADPCM microphone mode (0x01)
+            # This matches the Android app implementation
+            logger.info(f"Playing sound sample {sound_id}...")
+            logger.debug(f"Configuring speaker: mode=0x03 (SAMPLE), mic=0x01 (ADPCM)")
+
+            config_success = await self.configure_speaker(speaker_mode=0x03, microphone_mode=0x01)
+            if not config_success:
+                logger.error("Failed to configure speaker for sample mode")
+                return False
+
+            # Delay to ensure configuration is applied (Android app uses queue system)
+            await asyncio.sleep(0.1)
+
+            # Send the sample ID as a single byte to speaker data characteristic
+            # Android app uses WRITE_TYPE_NO_RESPONSE for speaker data
+            sample_data = bytes([sound_id])
+            logger.debug(f"Writing sound sample {sound_id} (0x{sound_id:02X}) to speaker data characteristic")
+
+            await self.client.write_gatt_char(SPEAKER_DATA_UUID, sample_data, response=False)
+
+            logger.info(f"Sound {sound_id} sent to device successfully")
             return True
         except Exception as e:
-            logger.error(f"Failed to play sound: {e}")
+            logger.error(f"Failed to play sound {sound_id}: {e}", exc_info=True)
             return False
 
     # === Advanced Sensor Methods ===

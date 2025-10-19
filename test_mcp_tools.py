@@ -210,10 +210,10 @@ class MCPToolTester:
         await self.test_tool("set_led_color", set_led_color, color="red", intensity=50)
         await asyncio.sleep(1)
 
-        # 2. Set LED breathe (blue)
-        print("\n2. set_led_breathe(color='blue', intensity=50)")
+        # 2. Set LED breathe (red)
+        print("\n2. set_led_breathe(color='red', intensity=50)")
         await self.test_tool(
-            "set_led_breathe", set_led_breathe, color="blue", intensity=50
+            "set_led_breathe", set_led_breathe, color="red", intensity=50
         )
         await asyncio.sleep(2)
 
